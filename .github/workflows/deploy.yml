@@ -2,7 +2,12 @@ name: Deploy a GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # El entorno github-pages solo acepta despliegues desde la rama por
+    # defecto del repositorio; se incluye la rama de trabajo (actual rama
+    # por defecto) además de main para que cada iteración se publique sola.
+    branches:
+      - main
+      - claude/doom-mobile-game-plan-ls4iuw
   workflow_dispatch:
 
 permissions:
