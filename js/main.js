@@ -1,7 +1,11 @@
-// Doom Celular — Iteración 0: esqueleto del juego.
-// Canvas a pantalla completa, game loop con requestAnimationFrame,
-// contador de FPS y visualización de toques para verificar multi-touch
-// en un teléfono real.
+// Doom Celular — game loop y orquestación.
+// Iteración 1: motor raycasting + movimiento con teclado (desktop).
+// Los toques se visualizan como círculos; los controles táctiles reales
+// llegan en la Iteración 2.
+
+import { level1 } from './maps.js';
+import * as raycaster from './raycaster.js';
+import { player, spawn, update as updatePlayer } from './player.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -12,12 +16,16 @@ const ctx = canvas.getContext('2d');
 const RENDER_HEIGHT = 180;
 let renderWidth = 320;
 
+const map = level1;
+spawn(map);
+
 function resize() {
   const aspect = window.innerWidth / window.innerHeight;
-  renderWidth = Math.round(RENDER_HEIGHT * aspect);
+  renderWidth = Math.max(120, Math.round(RENDER_HEIGHT * aspect));
   canvas.width = renderWidth;
   canvas.height = RENDER_HEIGHT;
   ctx.imageSmoothingEnabled = false;
+  raycaster.init(ctx, renderWidth, RENDER_HEIGHT);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -69,40 +77,14 @@ function frame(time) {
     fpsTime = 0;
   }
 
-  update(time / 1000);
-  render(time / 1000);
+  updatePlayer(map, dt);
+  raycaster.render(ctx, player, map);
+  drawOverlay();
 
   requestAnimationFrame(frame);
 }
 
-function update(t) {
-  // Iteración 1: aquí vivirá la lógica del jugador y del mundo.
-}
-
-function render(t) {
-  const w = renderWidth;
-  const h = RENDER_HEIGHT;
-
-  // Techo y suelo provisionales: el "hola mundo" del raycaster.
-  ctx.fillStyle = '#1a0e08';
-  ctx.fillRect(0, 0, w, h / 2);
-  ctx.fillStyle = '#2e2a24';
-  ctx.fillRect(0, h / 2, w, h / 2);
-
-  // Franja central pulsante, para ver que el loop está vivo.
-  const pulse = 0.5 + 0.5 * Math.sin(t * 2);
-  ctx.fillStyle = `rgb(${Math.round(120 + 80 * pulse)}, 20, 10)`;
-  ctx.fillRect(0, h / 2 - 2, w, 4);
-
-  // Título.
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#c22';
-  ctx.font = 'bold 24px monospace';
-  ctx.fillText('DOOM CELULAR', w / 2, h / 2 - 14);
-  ctx.fillStyle = '#886';
-  ctx.font = '8px monospace';
-  ctx.fillText('ITERACIÓN 0 — ESQUELETO', w / 2, h / 2 + 14);
-
+function drawOverlay() {
   // Toques activos: un círculo por dedo.
   ctx.strokeStyle = '#f80';
   ctx.lineWidth = 2;
@@ -112,11 +94,14 @@ function render(t) {
     ctx.stroke();
   }
 
-  // FPS arriba a la izquierda.
   ctx.textAlign = 'left';
   ctx.fillStyle = '#0f0';
   ctx.font = '8px monospace';
   ctx.fillText(`FPS ${fps}`, 4, 10);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(200, 190, 170, 0.6)';
+  ctx.fillText('WASD + flechas — controles táctiles en la próxima iteración', renderWidth / 2, RENDER_HEIGHT - 6);
 }
 
 requestAnimationFrame(frame);
