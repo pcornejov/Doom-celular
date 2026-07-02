@@ -17,10 +17,14 @@ import * as hud from './hud.js';
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-// Resolución interna de render: baja y fija, estilo retro. El canvas se
-// escala por CSS a pantalla completa (sin devicePixelRatio: la resolución
-// interna NO sube con la densidad de píxeles).
-const RENDER_HEIGHT = 180;
+// Resolución interna de render: baja, estilo retro. El canvas se escala por
+// CSS a pantalla completa (sin devicePixelRatio: la resolución interna NO
+// sube con la densidad de píxeles). Iteración 7: la altura es DINÁMICA — si
+// el teléfono no sostiene 45 fps se baja un escalón (180 → 150 → 120) y con
+// 10 s por encima de 55 fps se recupera uno (histéresis).
+const RES_STEPS = [180, 150, 120];
+let resStep = 0;
+let renderHeight = RES_STEPS[0];
 let renderWidth = 320;
 
 initTouch(canvas);
@@ -37,6 +41,32 @@ const state = {
 let endTimer = 0;   // evita avanzar por el mismo toque que te mató/ganó
 let levelTime = 0;  // tiempo en el nivel actual
 let nameTimer = 0;  // segundos que le quedan al rótulo con el nombre del nivel
+
+// resize se define antes de loadLevel porque loadLevel lo invoca: al cambiar
+// de nivel hay que re-llamar a raycaster.init con el mapa nuevo para que el
+// degradado de techo/suelo use los colores de ESE nivel.
+function resize() {
+  const aspect = window.innerWidth / window.innerHeight;
+  renderWidth = Math.max(120, Math.round(renderHeight * aspect));
+  canvas.width = renderWidth;
+  canvas.height = renderHeight;
+  ctx.imageSmoothingEnabled = false;
+  raycaster.init(ctx, renderWidth, renderHeight, state.map);
+}
+window.addEventListener('resize', resize);
+
+// --- Mejor marca del episodio (localStorage) ---
+// Se guarda el mejor tiempo total y su % de bajas. Gana el tiempo más bajo.
+const BEST_KEY = 'doomcel_best';
+let best = null;    // { t: segundos totales, k: % de bajas }
+let newBest = false; // el episodio recién terminado batió la marca
+try {
+  const raw = localStorage.getItem(BEST_KEY);
+  if (raw) {
+    const b = JSON.parse(raw);
+    if (b && typeof b.t === 'number' && typeof b.k === 'number') best = b;
+  }
+} catch (e) { /* sin storage: se juega sin récords */ }
 
 // Estadísticas del último nivel completado (para la intermisión) y totales.
 let lastKills = 0;
@@ -64,13 +94,19 @@ function loadLevel(index, hp) {
   endTimer = 0;
   levelTime = 0;
   nameTimer = 3;
+  resize(); // re-precalcula techo/suelo con los colores del mapa nuevo
 }
 loadLevel(0, 100);
 
 // Depuración: expone el estado para inspección / tests.
 window.player = player;
 window.enemies = enemies;
-window.__game = { state, weapon: weapon.weapon, items: items.items, touch };
+window.__game = {
+  state, weapon: weapon.weapon, items: items.items, touch,
+  get best() { return best; },
+  get newBest() { return newBest; },
+  get renderHeight() { return renderHeight; },
+};
 
 function completeLevel() {
   lastKills = countKills();
@@ -82,6 +118,16 @@ function completeLevel() {
   state.phase = state.levelIndex === levels.length - 1 ? 'end' : 'intermission';
   endTimer = 0;
   window.__audio?.playVictory?.();
+
+  // Fin del episodio: ¿se batió la mejor marca? (gana el tiempo más bajo)
+  if (state.phase === 'end') {
+    const pct = totalEnemies > 0 ? Math.round((totalKills / totalEnemies) * 100) : 100;
+    newBest = !best || totalTime < best.t;
+    if (newBest) {
+      best = { t: totalTime, k: pct };
+      try { localStorage.setItem(BEST_KEY, JSON.stringify(best)); } catch (e) { /* sin storage */ }
+    }
+  }
 }
 
 function nextLevel() {
@@ -115,16 +161,42 @@ canvas.addEventListener('touchstart', tryAdvance, { passive: true });
 canvas.addEventListener('click', tryAdvance);
 window.addEventListener('keydown', tryAdvance);
 
-function resize() {
-  const aspect = window.innerWidth / window.innerHeight;
-  renderWidth = Math.max(120, Math.round(RENDER_HEIGHT * aspect));
-  canvas.width = renderWidth;
-  canvas.height = RENDER_HEIGHT;
-  ctx.imageSmoothingEnabled = false;
-  raycaster.init(ctx, renderWidth, RENDER_HEIGHT);
+// --- Resolución dinámica ---
+// Cada muestra de FPS llega cada 0.5 s; la media móvil usa una ventana de
+// 3 s (6 muestras en un ring preasignado: sin allocations por frame).
+const FPS_SAMPLES = 6;
+const fpsRing = new Float32Array(FPS_SAMPLES);
+fpsRing.fill(60);
+let fpsRingIdx = 0;
+let highTime = 0;        // segundos seguidos por encima de 55 fps
+let resNoticeTimer = 0;  // segundos que le quedan al aviso en pantalla
+
+function setResolution(step) {
+  resStep = step;
+  renderHeight = RES_STEPS[step];
+  resize();
+  fpsRing.fill(60); // ventana limpia: que el cambio se evalúe desde cero
+  highTime = 0;
+  resNoticeTimer = 1;
 }
-window.addEventListener('resize', resize);
-resize();
+
+function onFpsSample(sample) {
+  fpsRing[fpsRingIdx] = sample;
+  fpsRingIdx = (fpsRingIdx + 1) % FPS_SAMPLES;
+  let sum = 0;
+  for (let i = 0; i < FPS_SAMPLES; i++) sum += fpsRing[i];
+  if (sum / FPS_SAMPLES < 45 && resStep < RES_STEPS.length - 1) {
+    setResolution(resStep + 1);
+    return;
+  }
+  // Histéresis para subir: 10 s seguidos por encima de 55 fps.
+  if (sample > 55) {
+    highTime += 0.5;
+    if (highTime >= 10 && resStep > 0) setResolution(resStep - 1);
+  } else {
+    highTime = 0;
+  }
+}
 
 // --- TAP TO START ---
 // El juego arranca pausado; el primer gesto (toque, clic o tecla) lo inicia.
@@ -174,7 +246,9 @@ function frame(time) {
     state.fps = fps;
     frames = 0;
     fpsTime = 0;
+    onFpsSample(fps);
   }
+  if (resNoticeTimer > 0) resNoticeTimer -= dt;
 
   if (started) {
     if (state.phase === 'playing') {
@@ -204,17 +278,17 @@ function frame(time) {
   raycaster.render(ctx, player, state.map, enemies, items.items);
   if (started) {
     if (state.phase === 'playing' || state.phase === 'intermission') {
-      weapon.render(ctx, renderWidth, RENDER_HEIGHT);
+      weapon.render(ctx, renderWidth, renderHeight);
     }
-    hud.render(ctx, renderWidth, RENDER_HEIGHT, dt);
+    hud.render(ctx, renderWidth, renderHeight, dt);
     if (state.phase === 'playing' && nameTimer > 0) {
-      hud.renderLevelName(ctx, renderWidth, RENDER_HEIGHT, state.map.name, nameTimer);
+      hud.renderLevelName(ctx, renderWidth, renderHeight, state.map.name, nameTimer);
     } else if (state.phase === 'dead') {
-      hud.renderDeath(ctx, renderWidth, RENDER_HEIGHT, dt);
+      hud.renderDeath(ctx, renderWidth, renderHeight, dt);
     } else if (state.phase === 'intermission') {
-      hud.renderIntermission(ctx, renderWidth, RENDER_HEIGHT, dt, state.map.name, lastKills, lastTotal, lastTime);
+      hud.renderIntermission(ctx, renderWidth, renderHeight, dt, state.map.name, lastKills, lastTotal, lastTime);
     } else if (state.phase === 'end') {
-      hud.renderEnd(ctx, renderWidth, RENDER_HEIGHT, dt, totalKills, totalEnemies, totalTime);
+      hud.renderEnd(ctx, renderWidth, renderHeight, dt, totalKills, totalEnemies, totalTime, best, newBest);
     }
   }
   drawOverlay();
@@ -228,7 +302,7 @@ function frame(time) {
 // tapan el centro de la pantalla. Sin allocations por frame.
 function drawTouchControls() {
   const sx = renderWidth / window.innerWidth;
-  const sy = RENDER_HEIGHT / window.innerHeight;
+  const sy = renderHeight / window.innerHeight;
 
   ctx.globalAlpha = 0.35;
   ctx.lineWidth = 1;
@@ -292,6 +366,16 @@ function drawTouchControls() {
 function drawOverlay() {
   if (started && touch.enabled) drawTouchControls();
 
+  // Aviso de 1 s cuando la resolución dinámica cambia de escalón.
+  if (resNoticeTimer > 0) {
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillStyle = '#000';
+    ctx.fillText('RESOLUCIÓN AJUSTADA', renderWidth / 2 + 1, 13);
+    ctx.fillStyle = '#ffd870';
+    ctx.fillText('RESOLUCIÓN AJUSTADA', renderWidth / 2, 12);
+  }
+
   ctx.textAlign = 'left';
   ctx.fillStyle = '#0f0';
   ctx.font = '8px monospace';
@@ -299,3 +383,12 @@ function drawOverlay() {
 }
 
 requestAnimationFrame(frame);
+
+// --- Service worker: instalable y jugable offline (cache-first, ver sw.js) ---
+// Ruta RELATIVA: en GitHub Pages el juego vive bajo /Doom-celular/.
+if ('serviceWorker' in navigator) {
+  try {
+    const p = navigator.serviceWorker.register('./sw.js');
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (e) { /* sin SW el juego funciona igual, solo no va offline */ }
+}

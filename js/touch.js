@@ -19,7 +19,10 @@
 import { player } from './player.js';
 
 // Sensibilidad de giro: radianes por píxel CSS de arrastre horizontal.
-export const LOOK_SENSITIVITY = 0.006;
+// 0.0075: un barrido completo de la zona derecha (~380-450 px CSS en un
+// teléfono en horizontal) gira ~165-195°, así que un 180° de combate sale
+// con UN gesto del pulgar sin reposicionar (con 0.006 se quedaba en ~130°).
+export const LOOK_SENSITIVITY = 0.0075;
 
 // Joystick: radio máximo como fracción del alto de pantalla y zona muerta
 // como fracción de ese radio.
@@ -66,7 +69,10 @@ function layout() {
   const margin = h * FIRE_MARGIN_FRAC;
   touch.fireX = window.innerWidth - margin - touch.fireRadius;
   touch.fireY = h - margin - touch.fireRadius;
-  touch.weaponRadius = touch.fireRadius * 0.55;
+  // Botón de arma: nunca por debajo de 48 px de diámetro táctil (guía
+  // Android/Apple); con fireRadius*0.55 a secas quedaba en ~30 px en un
+  // teléfono típico (h≈360-400 px CSS) y fallaban taps en pleno combate.
+  touch.weaponRadius = Math.max(touch.fireRadius * 0.55, 24);
   touch.weaponX = touch.fireX;
   touch.weaponY = touch.fireY - touch.fireRadius - touch.weaponRadius - h * 0.02;
 }

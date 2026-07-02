@@ -176,14 +176,22 @@ export function renderIntermission(ctx, W, H, dt, levelName, kills, total, time)
   );
 }
 
-// Fin del episodio (tras E1M3): totales de toda la campaña.
-export function renderEnd(ctx, W, H, dt, kills, total, time) {
+// Fin del episodio (tras E1M3): totales de toda la campaña y mejor marca
+// histórica (best = { t: segundos, k: % de bajas } o null si no hay récord).
+export function renderEnd(ctx, W, H, dt, kills, total, time, best, newBest) {
   endScreen(
     ctx, W, H, dt, 'rgba(10,40,10,0.6)', 'FIN DEL EPISODIO', '#2ec83e',
     'HAS PURGADO EL AVERNO',
     `IMPS ELIMINADOS  ${kills}/${total}`,
     `TIEMPO TOTAL  ${formatTime(time)}`,
-    null,
+    best ? `MEJOR MARCA  ${formatTime(best.t)} — ${best.k}%` : null,
     'TOCA PARA VOLVER A E1M1',
   );
+  // Récord recién batido: aviso parpadeante (más rápido que el prompt).
+  if (newBest && blinkTime % 0.7 < 0.4) {
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillStyle = '#ffe050';
+    ctx.fillText('¡NUEVA MEJOR MARCA!', W / 2, H / 2 + 26);
+  }
 }

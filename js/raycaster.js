@@ -2,7 +2,7 @@
 // Dibuja directo sobre un buffer de píxeles (Uint32Array ABGR) que se
 // vuelca al canvas con putImageData: cero allocations por frame.
 
-import { WALL_COLORS, CEILING_COLOR, FLOOR_COLOR, DOOR_TYPE } from './maps.js';
+import { WALL_COLORS, DOOR_TYPE } from './maps.js';
 
 const FOV_PLANE = 0.66; // ~66° de campo visual
 const FOG_DISTANCE = 14; // a esta distancia las paredes llegan al mínimo de luz
@@ -386,7 +386,10 @@ const spriteOrder = new Int32Array(MAX_SPRITES);
 const spriteDist = new Float32Array(MAX_SPRITES);
 const NO_ITEMS = [];
 
-export function init(ctx, width, height) {
+// init se llama al redimensionar Y al cambiar de nivel/resolución: recibe el
+// mapa actual para precalcular el degradado con SUS colores de techo/suelo
+// (map.ceilingColor / map.floorColor). Todo el coste es aquí, no por frame.
+export function init(ctx, width, height, map) {
   W = width;
   H = height;
   image = ctx.createImageData(W, H);
@@ -398,7 +401,7 @@ export function init(ctx, width, height) {
   const half = H / 2;
   for (let y = 0; y < H; y++) {
     const isCeiling = y < half;
-    const base = isCeiling ? CEILING_COLOR : FLOOR_COLOR;
+    const base = isCeiling ? map.ceilingColor : map.floorColor;
     const t = isCeiling ? (half - y) / half : (y - half) / half;
     const f = 0.35 + 0.65 * t;
     rowColor[y] = pack((base[0] * f) | 0, (base[1] * f) | 0, (base[2] * f) | 0);

@@ -138,6 +138,18 @@ Regla de oro: **cada iteración termina con una versión jugable publicada en Gi
 - Progresión entre niveles y puntuación final.
 - **Criterio de aceptación**: campaña corta completa (10–15 min) jugable de principio a fin en el teléfono.
 
+### Iteración 7 — De demo a app 📲
+*Responsable: Jugabilidad móvil*
+
+- PWA instalable: `manifest.webmanifest` + iconos PNG (192/512) con la cara del imp.
+- Service worker (`sw.js`) cache-first con precache versionado: jugable offline.
+- Vibración háptica en Android (disparo/daño/muerte) por `navigator.vibrate`, independiente del mute.
+- Resolución interna dinámica con histéresis (180 → 150 → 120 si caen los FPS, y de vuelta).
+- Ambiente por nivel: colores de techo/suelo propios de cada mapa.
+- Mejor marca del episodio (tiempo y % de bajas) en `localStorage`.
+- Ajuste ergonómico: sensibilidad de giro y tamaño mínimo del botón de arma (≥48 px).
+- **Criterio de aceptación**: se instala desde el navegador, funciona sin red y mantiene 60 fps (o degrada resolución sola).
+
 ---
 
 ## 4. Estructura del proyecto (objetivo)

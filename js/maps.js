@@ -101,8 +101,8 @@ export const WALL_COLORS = [
   [64, 68, 60],    // 7: panel de salida
 ];
 
-export const CEILING_COLOR = [42, 32, 26];
-export const FLOOR_COLOR = [58, 54, 46];
+// Ambiente por nivel: techo y suelo [r,g,b] propios de cada mapa (los lee
+// raycaster.init al precalcular rowColor; cambiar de nivel re-llama a init).
 
 // Ítems: índice de tipo (los usa items.js para textura y efecto).
 export const ITEM_HEALTH = 0;
@@ -149,18 +149,24 @@ export const level1 = {
   ...compile(LEVEL_1),
   name: 'E1M1 — LABERINTO DE HORMIGÓN',
   playerStart: { x: 2.5, y: 10.5, angle: 0 },
+  ceilingColor: [42, 32, 26],  // hormigón: techo pardo oscuro
+  floorColor: [58, 54, 46],    // suelo gris terroso
 };
 
 export const level2 = {
   ...compile(LEVEL_2),
   name: 'E1M2 — CATACUMBAS DE ÓXIDO',
   playerStart: { x: 2.5, y: 2.5, angle: 0 },
+  ceilingColor: [30, 40, 26],  // óxido: techo verdoso oscuro
+  floorColor: [72, 46, 28],    // suelo herrumbre
 };
 
 export const level3 = {
   ...compile(LEVEL_3),
   name: 'E1M3 — ARENA DEL AVERNO',
   playerStart: { x: 13.5, y: 14.5, angle: -Math.PI / 2 },
+  ceilingColor: [46, 12, 10],  // averno: techo rojo muy oscuro
+  floorColor: [54, 50, 50],    // suelo de ceniza
 };
 
 export const levels = [level1, level2, level3];

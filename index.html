@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
   <meta name="theme-color" content="#000000">
   <title>DOOM CELULAR — E1M1</title>
+  <!-- PWA instalable: manifest e iconos (rutas relativas por GitHub Pages). -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <!-- Favicon: carita de imp en SVG inline (sin peticiones ni dependencias). -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23200500'/%3E%3Crect x='3' y='1' width='2' height='3' fill='%23dcc8aa'/%3E%3Crect x='11' y='1' width='2' height='3' fill='%23dcc8aa'/%3E%3Crect x='3' y='4' width='10' height='9' fill='%2396502a'/%3E%3Crect x='5' y='6' width='2' height='2' fill='%23ffdc28'/%3E%3Crect x='9' y='6' width='2' height='2' fill='%23ffdc28'/%3E%3Crect x='6' y='10' width='4' height='2' fill='%232a0a0a'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
@@ -23,6 +26,8 @@
     <p class="copyright">© 1994 SOFTWARE DEL AVERNO S.A. — TODOS LOS DERECHOS RESERVADOS</p>
   </div>
   <script type="module" src="js/audio.js"></script>
+  <!-- haptics.js envuelve window.__audio: debe cargarse DESPUÉS de audio.js. -->
+  <script type="module" src="js/haptics.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
