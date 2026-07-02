@@ -1,8 +1,12 @@
 // Enemigos (imps): máquina de estados idle → chase → attack, con hurt y dead.
-// Todo preasignado al cargar el módulo: cero allocations dentro del update.
+// Los spawns vienen del mapa compilado (marcadores 'S' y 's'); loadEnemies()
+// reconstruye el array al cargar cada nivel (fuera del loop: cero allocations
+// por frame).
 //
-// Cada enemigo expone `pose` (0 de pie, 1 atacando, 2 herido, 3 cadáver) para
-// que el raycaster elija el bitmap sin conocer la lógica de estados.
+// Dos variantes: imp normal y imp rápido ('s', tinte azulado en el sprite):
+// más veloz y frágil, pega menos. Cada enemigo expone `pose` (0 de pie,
+// 1 atacando, 2 herido, 3 cadáver) y `fast` para que el raycaster elija el
+// bitmap sin conocer la lógica de estados.
 
 import { cellAt } from './maps.js';
 import { player, damagePlayer } from './player.js';
@@ -10,7 +14,9 @@ import { player, damagePlayer } from './player.js';
 export const STATE = { IDLE: 0, CHASE: 1, ATTACK: 2, HURT: 3, DEAD: 4 };
 
 const HP = 30;
+const HP_FAST = 20;
 const SPEED = 1.6;          // celdas por segundo persiguiendo
+const SPEED_FAST = 2.4;
 const RADIUS = 0.22;        // mismo margen de colisión que el jugador
 const SIGHT_DIST = 10;      // distancia máxima a la que ve al jugador
 const ATTACK_DIST = 1.2;    // entra en ataque por debajo de esta distancia
@@ -18,52 +24,37 @@ const ATTACK_EXIT = 1.6;    // vuelve a perseguir por encima de esta
 const ATTACK_PERIOD = 1.0;  // segundos entre golpes
 const ATTACK_WINDUP = 0.6;  // retardo del primer golpe al entrar en ataque
 const HURT_TIME = 0.3;      // stun al recibir daño
+
 const SEPARATION = 0.6;     // distancia mínima entre enemigos (repulsión)
 
-// Posiciones iniciales en el nivel 1, repartidas por las salas y lejos del
-// spawn del jugador (2.5, 10.5).
-const SPAWNS = [
-  [3.5, 4.5],    // sala de ladrillo (noroeste)
-  [15.5, 4.5],   // sala de metal (norte)
-  [21.5, 4.5],   // pasillo este
-  [17.5, 11.5],  // sala roja
-  [13.5, 9.5],   // corredor central
-  [7.5, 18.5],   // sala sur oeste
-  [9.5, 18.5],   // sala sur centro
-  [17.5, 21.5],  // sala sur este
-];
-
 export const enemies = [];
-for (let i = 0; i < SPAWNS.length; i++) {
-  enemies.push({
-    x: SPAWNS[i][0],
-    y: SPAWNS[i][1],
-    hp: HP,
-    state: STATE.IDLE,
-    pose: 0,
-    stateTime: 0,
-    attackTimer: 0,
-  });
-}
 
-export function reset() {
-  for (let i = 0; i < enemies.length; i++) {
-    const e = enemies[i];
-    e.x = SPAWNS[i][0];
-    e.y = SPAWNS[i][1];
-    e.hp = HP;
-    e.state = STATE.IDLE;
-    e.pose = 0;
-    e.stateTime = 0;
-    e.attackTimer = 0;
+// (Re)puebla el array in-place con los spawns del mapa: la identidad del
+// array se conserva (window.enemies y los módulos que lo importan siguen
+// viendo el mismo objeto).
+export function loadEnemies(map) {
+  enemies.length = 0;
+  const spawns = map.enemySpawns;
+  for (let i = 0; i < spawns.length; i++) {
+    enemies.push({
+      x: spawns[i].x,
+      y: spawns[i].y,
+      fast: spawns[i].fast,
+      hp: spawns[i].fast ? HP_FAST : HP,
+      state: STATE.IDLE,
+      pose: 0,
+      stateTime: 0,
+      attackTimer: 0,
+    });
   }
 }
 
-export function allDead() {
+export function countKills() {
+  let k = 0;
   for (let i = 0; i < enemies.length; i++) {
-    if (enemies[i].state !== STATE.DEAD) return false;
+    if (enemies[i].state === STATE.DEAD) k++;
   }
-  return true;
+  return k;
 }
 
 // Daño recibido (lo llama el arma). Stun breve; a dead si se queda sin vida.
@@ -177,7 +168,7 @@ export function update(map, dt) {
           break;
         }
         if (dist > 1e-6) {
-          const step = (SPEED * dt) / dist;
+          const step = ((e.fast ? SPEED_FAST : SPEED) * dt) / dist;
           tryMoveEnemy(map, e, e.x + dx * step, e.y + dy * step);
         }
         break;
@@ -195,7 +186,8 @@ export function update(map, dt) {
         if (e.attackTimer <= 0) {
           e.attackTimer += ATTACK_PERIOD;
           if (dist < ATTACK_EXIT && lineOfSight(map, e.x, e.y, player.x, player.y)) {
-            damagePlayer(8 + ((Math.random() * 5) | 0)); // 8-12
+            // Normal 8-12, rápido 5-8.
+            damagePlayer(e.fast ? 5 + ((Math.random() * 4) | 0) : 8 + ((Math.random() * 5) | 0));
           }
         }
         break;

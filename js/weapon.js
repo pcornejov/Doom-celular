@@ -1,33 +1,52 @@
-// Pistola hitscan en primera persona.
-// - Disparo con touch.firePressed, Espacio o clic; cadencia ~3/s, munición 48.
-// - El impacto es instantáneo: primer enemigo vivo cuya perpendicular a la
-//   línea de vista es < 0.35 y que queda antes de la primera pared.
-// - Render: bitmap procedural (pistola + manos) pre-renderizado a un canvas
-//   offscreen una sola vez; retroceso en 3 pasos, fogonazo y bob al caminar.
+// Armas hitscan en primera persona: pistola (arma 0) y escopeta (arma 1, se
+// recoge en E1M2). Munición compartida (BALAS, máx 99).
+// - Pistola: 1 bala, daño 10-15, cadencia ~3/s.
+// - Escopeta: 2 balas, 7 perdigones con dispersión ±0.09 rad, daño 6-10 cada
+//   uno, cadencia 0.9 s. Si se dispara con menos de 2 balas cae a la pistola.
+// - Cambio de arma: teclas 1/2 o el botón táctil '1/2' sobre el de disparo
+//   (touch.js encola touch.switchQueued; se consume aquí).
+// - Render: bitmaps procedurales pre-renderizados a canvases offscreen una
+//   sola vez; retroceso en pasos discretos, fogonazo y bob al caminar.
 
 import { player } from './player.js';
 import { touch } from './touch.js';
 import { cellAt } from './maps.js';
 import { enemies, hitEnemy, STATE } from './enemies.js';
 
-const FIRE_COOLDOWN = 0.34; // ~3 disparos por segundo
-const HIT_HALF_WIDTH = 0.35;
+export const MAX_AMMO = 99;
 const START_AMMO = 48;
+const PISTOL_COOLDOWN = 0.34;
+const SHOTGUN_COOLDOWN = 0.9;
+const SHOTGUN_PELLETS = 7;
+const SHOTGUN_SPREAD = 0.03; // rad entre perdigones (±0.09 en total)
+const HIT_HALF_WIDTH = 0.35;
 
 export const weapon = {
   ammo: START_AMMO,
+  hasShotgun: false,
+  current: 0,  // 0 pistola, 1 escopeta
   cooldown: 0,
   recoil: 0,   // temporizador de retroceso
   flash: 0,    // temporizador de fogonazo
   bobPhase: 0, // fase del balanceo al caminar
 };
 
+// Reinicio total (nuevo episodio): pierde la escopeta.
 export function reset() {
   weapon.ammo = START_AMMO;
+  weapon.hasShotgun = false;
+  weapon.current = 0;
   weapon.cooldown = 0;
   weapon.recoil = 0;
   weapon.flash = 0;
   weapon.bobPhase = 0;
+}
+
+// Recoger la escopeta (lo llama items.js): la equipa y regala unas balas.
+export function giveShotgun() {
+  weapon.hasShotgun = true;
+  weapon.current = 1;
+  weapon.ammo = Math.min(MAX_AMMO, weapon.ammo + 4);
 }
 
 // --- Entrada de disparo (teclado / ratón; lo táctil llega por touch.js) ---
@@ -39,6 +58,10 @@ export function initWeapon(canvas) {
     if (e.code === 'Space') {
       e.preventDefault();
       fireKey = true;
+    } else if (e.code === 'Digit1') {
+      weapon.current = 0;
+    } else if (e.code === 'Digit2' && weapon.hasShotgun) {
+      weapon.current = 1;
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -52,9 +75,11 @@ export function initWeapon(canvas) {
   window.addEventListener('mouseup', () => { fireMouse = false; });
 }
 
-// --- Bitmap de la pistola (una vez, al cargar) ---
+// --- Bitmaps de las armas (una vez, al cargar) ---
 const GUN_W = 40;
 const GUN_H = 30;
+const SG_W = 56;
+const SG_H = 30;
 
 function bakeGun(slideBack) {
   const c = document.createElement('canvas');
@@ -95,15 +120,63 @@ function bakeGun(slideBack) {
   return c;
 }
 
+function bakeShotgun(fired) {
+  const c = document.createElement('canvas');
+  c.width = SG_W;
+  c.height = SG_H;
+  const g = c.getContext('2d');
+  const kick = fired ? 3 : 0; // toda el arma recula al disparar
+
+  // Doble cañón vertical al centro
+  g.fillStyle = '#0c0e12';
+  g.fillRect(21, kick, 6, 13);
+  g.fillRect(29, kick, 6, 13);
+  g.fillStyle = '#7e8694';
+  g.fillRect(22, kick + 1, 4, 12);
+  g.fillRect(30, kick + 1, 4, 12);
+  g.fillStyle = '#c0c8d4';
+  g.fillRect(22, kick + 1, 1, 12);
+  g.fillRect(30, kick + 1, 1, 12);
+  // Bocas de los cañones
+  g.fillStyle = '#000';
+  g.fillRect(22, kick, 4, 2);
+  g.fillRect(30, kick, 4, 2);
+  // Abrazadera
+  g.fillStyle = '#2e323a';
+  g.fillRect(20, kick + 8, 16, 3);
+  // Recámara y guardamanos de madera
+  g.fillStyle = '#3a2410';
+  g.fillRect(18, 13 + kick, 20, 7);
+  g.fillStyle = '#7a4a20';
+  g.fillRect(19, 14 + kick, 18, 5);
+  g.fillStyle = '#935c2a';
+  g.fillRect(19, 14 + kick, 18, 2);
+  // Manos: izquierda en el guardamanos, derecha en el disparador
+  g.fillStyle = '#c8905a';
+  g.fillRect(12, 18, 12, 9);
+  g.fillRect(32, 20, 12, 9);
+  g.fillStyle = '#96683c';
+  g.fillRect(12, 18, 3, 9);
+  g.fillRect(41, 20, 3, 9);
+  g.fillRect(12, 25, 12, 2);
+  g.fillRect(32, 27, 12, 2);
+  // Culata asomando a la derecha
+  g.fillStyle = '#503018';
+  g.fillRect(38, 22, 8, 6);
+  return c;
+}
+
 const gunIdle = bakeGun(false);
 const gunFire = bakeGun(true);
+const sgIdle = bakeShotgun(false);
+const sgFire = bakeShotgun(true);
 
 // --- Lógica ---
 let prevX = 0;
 let prevY = 0;
 const TAU = Math.PI * 2;
 
-// Distancia a la primera pared siguiendo la dirección de vista (DDA).
+// Distancia a la primera pared siguiendo una dirección (DDA).
 function castWallDistance(map, x, y, rdx, rdy) {
   let mapX = x | 0;
   let mapY = y | 0;
@@ -142,18 +215,13 @@ function castWallDistance(map, x, y, rdx, rdy) {
   return side === 0 ? sideDistX - deltaDistX : sideDistY - deltaDistY;
 }
 
-function fire(map) {
-  weapon.cooldown = FIRE_COOLDOWN;
-  weapon.ammo--;
-  weapon.recoil = 0.15;
-  weapon.flash = 0.08;
-  window.__audio?.playShot?.();
-
-  const dirX = Math.cos(player.angle);
-  const dirY = Math.sin(player.angle);
+// Un rayo hitscan: daña al primer enemigo vivo dentro del pasillo de impacto
+// y antes de la primera pared.
+function hitscan(map, angle, dmg) {
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
   const wallDist = castWallDistance(map, player.x, player.y, dirX, dirY);
 
-  // Primer enemigo vivo dentro del pasillo de impacto y antes de la pared.
   let best = null;
   let bestForward = Infinity;
   for (let i = 0; i < enemies.length; i++) {
@@ -170,13 +238,41 @@ function fire(map) {
       best = e;
     }
   }
-  if (best) hitEnemy(best, 10 + ((Math.random() * 6) | 0)); // 10-15
+  if (best) hitEnemy(best, dmg);
+}
+
+function firePistol(map) {
+  weapon.cooldown = PISTOL_COOLDOWN;
+  weapon.ammo--;
+  weapon.recoil = 0.15;
+  weapon.flash = 0.08;
+  window.__audio?.playShot?.();
+  hitscan(map, player.angle, 10 + ((Math.random() * 6) | 0)); // 10-15
+}
+
+function fireShotgun(map) {
+  weapon.cooldown = SHOTGUN_COOLDOWN;
+  weapon.ammo -= 2;
+  weapon.recoil = 0.22;
+  weapon.flash = 0.1;
+  (window.__audio?.playShotgun ?? window.__audio?.playShot)?.();
+  for (let k = 0; k < SHOTGUN_PELLETS; k++) {
+    const a = player.angle + (k - (SHOTGUN_PELLETS - 1) / 2) * SHOTGUN_SPREAD;
+    hitscan(map, a, 6 + ((Math.random() * 5) | 0)); // 6-10 por perdigón
+  }
 }
 
 export function update(map, dt) {
   if (weapon.cooldown > 0) weapon.cooldown -= dt;
   if (weapon.recoil > 0) weapon.recoil -= dt;
   if (weapon.flash > 0) weapon.flash -= dt;
+
+  // Botón táctil de cambio de arma: touch.js solo encola la intención.
+  touch.weaponBtnEnabled = weapon.hasShotgun;
+  if (touch.switchQueued) {
+    touch.switchQueued = false;
+    if (weapon.hasShotgun) weapon.current = weapon.current === 0 ? 1 : 0;
+  }
 
   // Bob: la fase avanza con la distancia recorrida (no con el tiempo).
   const mx = player.x - prevX;
@@ -189,14 +285,20 @@ export function update(map, dt) {
   }
 
   const wantFire = touch.firePressed || fireKey || fireMouse;
-  if (wantFire && weapon.cooldown <= 0 && weapon.ammo > 0) fire(map);
+  if (wantFire && weapon.cooldown <= 0) {
+    if (weapon.current === 1 && weapon.hasShotgun && weapon.ammo >= 2) fireShotgun(map);
+    else if (weapon.ammo >= 1) firePistol(map);
+  }
 }
 
 // Dibuja el arma abajo al centro, sobre el frame ya volcado.
 export function render(ctx, W, H) {
-  const scale = H / 66; // la pistola ocupa ~45% del alto de render
-  const w = GUN_W * scale;
-  const h = GUN_H * scale;
+  const shotgun = weapon.current === 1 && weapon.hasShotgun;
+  const gw = shotgun ? SG_W : GUN_W;
+  const gh = shotgun ? SG_H : GUN_H;
+  const scale = H / 66; // el arma ocupa ~45% del alto de render
+  const w = gw * scale;
+  const h = gh * scale;
 
   const bobX = Math.sin(weapon.bobPhase) * 3;
   const bobY = Math.abs(Math.cos(weapon.bobPhase)) * 2;
@@ -206,19 +308,22 @@ export function render(ctx, W, H) {
   if (weapon.recoil > 0.1) kick = 3;
   else if (weapon.recoil > 0.05) kick = 2;
   else if (weapon.recoil > 0) kick = 1;
-  const kickY = kick * 3;
+  const kickY = kick * (shotgun ? 4 : 3);
 
   const x = (W - w) / 2 + bobX;
   const y = H - h * 0.86 + bobY + kickY;
 
   const firing = weapon.recoil > 0.05;
-  ctx.drawImage(firing ? gunFire : gunIdle, x, y, w, h);
+  ctx.drawImage(
+    shotgun ? (firing ? sgFire : sgIdle) : (firing ? gunFire : gunIdle),
+    x, y, w, h,
+  );
 
-  // Fogonazo en la boca del cañón (1-2 frames).
+  // Fogonazo en la boca del cañón (1-2 frames); más ancho en la escopeta.
   if (weapon.flash > 0) {
     const fx = x + w / 2;
     const fy = y + 2 * scale;
-    const r = (weapon.flash > 0.04 ? 7 : 4) * scale * 0.6;
+    const r = (weapon.flash > 0.04 ? 7 : 4) * scale * (shotgun ? 0.9 : 0.6);
     ctx.fillStyle = '#ff9820';
     ctx.beginPath();
     ctx.arc(fx, fy, r, 0, TAU);

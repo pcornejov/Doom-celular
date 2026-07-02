@@ -4,7 +4,7 @@
 
 import { player } from './player.js';
 import { weapon } from './weapon.js';
-import { enemies, STATE } from './enemies.js';
+import { enemies, countKills } from './enemies.js';
 
 const BAR_W = 132;
 const BAR_H = 14;
@@ -100,17 +100,28 @@ export function render(ctx, W, H, dt) {
   ctx.drawImage(face, ((W - 12) / 2) | 0, y0 + 1, 12, 12);
 }
 
-// Estadísticas de fin de partida: recuento barato sobre el array de enemigos
-// (8 elementos; solo se ejecuta en las pantallas de muerte / victoria).
-function countKills() {
-  let k = 0;
-  for (let i = 0; i < enemies.length; i++) {
-    if (enemies[i].state === STATE.DEAD) k++;
-  }
-  return k;
+// Nombre del nivel unos segundos al empezar (main.js lleva el temporizador;
+// se desvanece en el último medio segundo).
+export function renderLevelName(ctx, W, H, name, timer) {
+  ctx.globalAlpha = timer < 0.5 ? timer * 2 : 1;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 10px monospace';
+  ctx.fillStyle = '#000';
+  ctx.fillText(name, W / 2 + 1, 25);
+  ctx.fillStyle = '#ffd870';
+  ctx.fillText(name, W / 2, 24);
+  ctx.globalAlpha = 1;
 }
 
-function endScreen(ctx, W, H, dt, bg, title, titleColor, prompt) {
+function formatTime(t) {
+  const m = (t / 60) | 0;
+  const s = (t % 60) | 0;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+// Pantalla de fin genérica: título, subtítulo, hasta 3 líneas de
+// estadísticas y aviso parpadeante. Solo se ejecuta fuera del juego activo.
+function endScreen(ctx, W, H, dt, bg, title, titleColor, sub, l1, l2, l3, prompt) {
   blinkTime += dt;
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
@@ -120,27 +131,59 @@ function endScreen(ctx, W, H, dt, bg, title, titleColor, prompt) {
   ctx.fillRect(0, H - 26, W, 26);
 
   ctx.textAlign = 'center';
-  ctx.font = 'bold 18px monospace';
+  ctx.font = 'bold 16px monospace';
   ctx.fillStyle = titleColor;
-  ctx.fillText(title, W / 2, H / 2 - 20);
+  ctx.fillText(title, W / 2, H / 2 - 28);
+
+  if (sub) {
+    ctx.font = 'bold 7px monospace';
+    ctx.fillStyle = '#e0d0a0';
+    ctx.fillText(sub, W / 2, H / 2 - 16);
+  }
 
   // Estadísticas con la misma tipografía monospace del HUD.
   ctx.font = 'bold 7px monospace';
   ctx.fillStyle = '#c8b890';
-  ctx.fillText(`IMPS ELIMINADOS  ${countKills()}/${enemies.length}`, W / 2, H / 2 - 4);
-  ctx.fillText(`BALAS RESTANTES  ${weapon.ammo}`, W / 2, H / 2 + 6);
+  ctx.fillText(l1, W / 2, H / 2 - 2);
+  ctx.fillText(l2, W / 2, H / 2 + 8);
+  if (l3) ctx.fillText(l3, W / 2, H / 2 + 18);
 
   if (blinkTime % 1 < 0.65) {
     ctx.font = 'bold 8px monospace';
     ctx.fillStyle = '#ffd870';
-    ctx.fillText(prompt, W / 2, H / 2 + 24);
+    ctx.fillText(prompt, W / 2, H / 2 + 34);
   }
 }
 
 export function renderDeath(ctx, W, H, dt) {
-  endScreen(ctx, W, H, dt, 'rgba(90,0,0,0.55)', 'HAS MUERTO', '#ff2814', 'TOCA PARA REINTENTAR');
+  endScreen(
+    ctx, W, H, dt, 'rgba(90,0,0,0.55)', 'HAS MUERTO', '#ff2814', null,
+    `IMPS ELIMINADOS  ${countKills()}/${enemies.length}`,
+    `BALAS RESTANTES  ${weapon.ammo}`,
+    null,
+    'TOCA PARA REINTENTAR',
+  );
 }
 
-export function renderVictory(ctx, W, H, dt) {
-  endScreen(ctx, W, H, dt, 'rgba(10,40,10,0.55)', 'NIVEL LIMPIO', '#ffd870', 'TOCA PARA VOLVER A JUGAR');
+// Intermisión entre niveles: estadísticas del nivel recién completado.
+export function renderIntermission(ctx, W, H, dt, levelName, kills, total, time) {
+  endScreen(
+    ctx, W, H, dt, 'rgba(10,30,50,0.6)', 'NIVEL COMPLETADO', '#ffd870', levelName,
+    `IMPS ELIMINADOS  ${kills}/${total}`,
+    `BALAS RESTANTES  ${weapon.ammo}`,
+    `TIEMPO  ${formatTime(time)}`,
+    'TOCA PARA CONTINUAR',
+  );
+}
+
+// Fin del episodio (tras E1M3): totales de toda la campaña.
+export function renderEnd(ctx, W, H, dt, kills, total, time) {
+  endScreen(
+    ctx, W, H, dt, 'rgba(10,40,10,0.6)', 'FIN DEL EPISODIO', '#2ec83e',
+    'HAS PURGADO EL AVERNO',
+    `IMPS ELIMINADOS  ${kills}/${total}`,
+    `TIEMPO TOTAL  ${formatTime(time)}`,
+    null,
+    'TOCA PARA VOLVER A E1M1',
+  );
 }

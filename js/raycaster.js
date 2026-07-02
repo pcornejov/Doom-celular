@@ -2,7 +2,7 @@
 // Dibuja directo sobre un buffer de píxeles (Uint32Array ABGR) que se
 // vuelca al canvas con putImageData: cero allocations por frame.
 
-import { WALL_COLORS, CEILING_COLOR, FLOOR_COLOR } from './maps.js';
+import { WALL_COLORS, CEILING_COLOR, FLOOR_COLOR, DOOR_TYPE } from './maps.js';
 
 const FOV_PLANE = 0.66; // ~66° de campo visual
 const FOG_DISTANCE = 14; // a esta distancia las paredes llegan al mínimo de luz
@@ -29,8 +29,9 @@ const SPR_W = 24;
 const SPR_H = 32;
 
 // Hornea un dibujo hecho con canvas 2D a un Uint32Array en el formato ABGR
-// del buffer de render. Lo usan tanto los sprites como las texturas de pared.
-function bake(w, h, draw) {
+// del buffer de render. Lo usan los sprites (también los ítems de items.js)
+// y las texturas de pared.
+export function bake(w, h, draw) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -114,18 +115,42 @@ function drawCorpse(g) {
   g.fillRect(9, 28, 8, 2);
 }
 
+// Tinte al hornear: pinta encima solo donde ya hay píxeles (source-atop).
+function tint(g, color) {
+  g.globalCompositeOperation = 'source-atop';
+  g.fillStyle = color;
+  g.fillRect(0, 0, SPR_W, SPR_H);
+  g.globalCompositeOperation = 'source-over';
+}
+
 // Poses: 0 de pie, 1 atacando, 2 herido (tintado blanco), 3 cadáver.
-const POSES = [
-  bakeSprite((g) => drawImp(g, false)),
-  bakeSprite((g) => drawImp(g, true)),
-  bakeSprite((g) => {
-    drawImp(g, false);
-    g.globalCompositeOperation = 'source-atop';
-    g.fillStyle = 'rgba(255,255,255,0.55)';
-    g.fillRect(0, 0, SPR_W, SPR_H);
-  }),
-  bakeSprite(drawCorpse),
-];
+// El imp rápido reusa los mismos dibujos con un tinte azulado al hornear.
+const FAST_TINT = 'rgba(45,90,220,0.5)';
+
+function bakePoses(fast) {
+  return [
+    bakeSprite((g) => {
+      drawImp(g, false);
+      if (fast) tint(g, FAST_TINT);
+    }),
+    bakeSprite((g) => {
+      drawImp(g, true);
+      if (fast) tint(g, FAST_TINT);
+    }),
+    bakeSprite((g) => {
+      drawImp(g, false);
+      if (fast) tint(g, FAST_TINT);
+      tint(g, 'rgba(255,255,255,0.55)');
+    }),
+    bakeSprite((g) => {
+      drawCorpse(g);
+      if (fast) tint(g, FAST_TINT);
+    }),
+  ];
+}
+
+const POSES = bakePoses(false);
+const POSES_FAST = bakePoses(true);
 
 // ---------------------------------------------------------------------------
 // Texturas de pared: 32×32, procedurales, horneadas UNA VEZ al cargar con el
@@ -284,6 +309,64 @@ function drawGreenTex(g, base) {
   }
 }
 
+// Tipo 6 — puerta: paneles verticales dorados con junta central y tiradores.
+function drawDoorTex(g, base) {
+  g.fillStyle = css(base, 0.9);
+  g.fillRect(0, 0, TEX, TEX);
+  for (let i = 0; i < 40; i++) { // veta vertical
+    g.fillStyle = css(base, 0.78 + trnd() * 0.34);
+    g.fillRect((trnd() * TEX) | 0, (trnd() * TEX) | 0, 1, 3 + ((trnd() * 4) | 0));
+  }
+  // Marco oscuro y junta central (por donde "abre").
+  g.fillStyle = css(base, 0.4);
+  g.fillRect(0, 0, 2, TEX);
+  g.fillRect(30, 0, 2, TEX);
+  g.fillRect(0, 0, TEX, 2);
+  g.fillRect(0, 30, TEX, 2);
+  g.fillRect(15, 0, 2, TEX);
+  g.fillStyle = css(base, 1.3);
+  g.fillRect(2, 2, 1, 28);
+  g.fillRect(17, 2, 1, 28);
+  // Tiradores a ambos lados de la junta.
+  g.fillStyle = css(base, 1.5);
+  g.fillRect(11, 15, 3, 3);
+  g.fillRect(18, 15, 3, 3);
+  g.fillStyle = '#181008';
+  g.fillRect(12, 16, 1, 1);
+  g.fillRect(19, 16, 1, 1);
+}
+
+// Tipo 7 — salida: panel oscuro con botón verde brillante y franjas.
+function drawExitTex(g, base) {
+  g.fillStyle = css(base, 0.9);
+  g.fillRect(0, 0, TEX, TEX);
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = css(base, 0.75 + trnd() * 0.3);
+    g.fillRect((trnd() * TEX) | 0, (trnd() * TEX) | 0, 2, 1);
+  }
+  // Franjas de advertencia verdes arriba y abajo.
+  for (let x = 0; x < TEX; x += 8) {
+    g.fillStyle = '#1e8a2a';
+    g.fillRect(x, 1, 4, 3);
+    g.fillRect(x + 4, 28, 4, 3);
+    g.fillStyle = '#0e1410';
+    g.fillRect(x + 4, 1, 4, 3);
+    g.fillRect(x, 28, 4, 3);
+  }
+  // Placa hundida con el botón de salida.
+  g.fillStyle = css(base, 0.45);
+  g.fillRect(8, 8, 16, 16);
+  g.fillStyle = css(base, 1.25);
+  g.fillRect(8, 8, 16, 1);
+  g.fillRect(8, 8, 1, 16);
+  g.fillStyle = '#0c3812';
+  g.fillRect(11, 11, 10, 10);
+  g.fillStyle = '#2ec83e';
+  g.fillRect(12, 12, 8, 8);
+  g.fillStyle = '#9cffa8';
+  g.fillRect(13, 13, 3, 3);
+}
+
 // Índice por tipo de pared (0 no se dibuja nunca: el DDA para en tipo > 0).
 const WALL_TEX = [
   null,
@@ -292,11 +375,16 @@ const WALL_TEX = [
   bake(TEX, TEX, (g) => drawMetalTex(g, WALL_COLORS[3])),
   bake(TEX, TEX, (g) => drawRedTex(g, WALL_COLORS[4])),
   bake(TEX, TEX, (g) => drawGreenTex(g, WALL_COLORS[5])),
+  bake(TEX, TEX, (g) => drawDoorTex(g, WALL_COLORS[6])),
+  bake(TEX, TEX, (g) => drawExitTex(g, WALL_COLORS[7])),
 ];
 
 // Buffers de ordenación por distancia (preasignados; insertion sort in-place).
-const spriteOrder = new Int32Array(32);
-const spriteDist = new Float32Array(32);
+// Capacidad para enemigos + ítems del nivel más poblado, con margen.
+const MAX_SPRITES = 64;
+const spriteOrder = new Int32Array(MAX_SPRITES);
+const spriteDist = new Float32Array(MAX_SPRITES);
+const NO_ITEMS = [];
 
 export function init(ctx, width, height) {
   W = width;
@@ -317,7 +405,7 @@ export function init(ctx, width, height) {
   }
 }
 
-export function render(ctx, player, map, enemies) {
+export function render(ctx, player, map, enemies, items) {
   const dirX = Math.cos(player.angle);
   const dirY = Math.sin(player.angle);
   const planeX = -dirY * FOV_PLANE;
@@ -381,7 +469,14 @@ export function render(ctx, player, map, enemies) {
     zbuffer[x] = perpDist;
 
     const lineHeight = (H / perpDist) | 0;
-    let drawStart = ((H - lineHeight) / 2) | 0;
+    // Borde superior de la columna. Una puerta abriéndose se hunde en el
+    // suelo: su tope baja según el progreso de apertura (map.doorProg).
+    let wallTop = (H - lineHeight) / 2;
+    if (wallType === DOOR_TYPE) {
+      const p = map.doorProg[mapY * map.w + mapX];
+      if (p > 0) wallTop += lineHeight * p;
+    }
+    let drawStart = wallTop | 0;
     let drawEnd = ((H + lineHeight) / 2) | 0;
     if (drawStart < 0) drawStart = 0;
     if (drawEnd > H) drawEnd = H;
@@ -407,7 +502,7 @@ export function render(ctx, player, map, enemies) {
     // bucle); el AND con TEX_MASK envuelve la textura verticalmente.
     const tex = WALL_TEX[wallType] || WALL_TEX[1];
     const texStep = TEX / lineHeight;
-    let texPos = (drawStart - (H - lineHeight) / 2) * texStep;
+    let texPos = (drawStart - wallTop) * texStep;
     let idx = drawStart * W + x;
     for (let y = drawStart; y < drawEnd; y++) {
       const pix = tex[(((texPos | 0) & TEX_MASK) << TEX_SHIFT) | texX];
@@ -420,7 +515,7 @@ export function render(ctx, player, map, enemies) {
     }
   }
 
-  if (enemies) drawSprites(player, dirX, dirY, planeX, planeY, enemies);
+  if (enemies) drawSprites(player, dirX, dirY, planeX, planeY, enemies, items || NO_ITEMS);
 
   ctx.putImageData(image, 0, 0);
 }
@@ -428,14 +523,25 @@ export function render(ctx, player, map, enemies) {
 // Proyección clásica de sprites: transformar la posición relativa con la
 // inversa de la matriz cámara [dir, plane], escalar por 1/transformY y
 // recortar cada columna contra el z-buffer de las paredes.
-function drawSprites(player, dirX, dirY, planeX, planeY, enemies) {
+// Una sola lista ordenada mezcla enemigos (índices 0..nE-1, textura según
+// pose) e ítems (índices nE.., textura y tamaño propios: {x,y,tex,texW,texH,
+// sizeFactor}).
+function drawSprites(player, dirX, dirY, planeX, planeY, enemies, items) {
   // Orden por distancia descendente (los lejanos primero).
+  const nE = enemies.length;
   let n = 0;
-  for (let i = 0; i < enemies.length; i++) {
+  for (let i = 0; i < nE && n < MAX_SPRITES; i++) {
     const dx = enemies[i].x - player.x;
     const dy = enemies[i].y - player.y;
     spriteDist[n] = dx * dx + dy * dy;
     spriteOrder[n] = i;
+    n++;
+  }
+  for (let i = 0; i < items.length && n < MAX_SPRITES; i++) {
+    const dx = items[i].x - player.x;
+    const dy = items[i].y - player.y;
+    spriteDist[n] = dx * dx + dy * dy;
+    spriteOrder[n] = nE + i;
     n++;
   }
   for (let i = 1; i < n; i++) {
@@ -454,22 +560,39 @@ function drawSprites(player, dirX, dirY, planeX, planeY, enemies) {
   const invDet = 1 / (planeX * dirY - dirX * planeY);
 
   for (let i = 0; i < n; i++) {
-    const e = enemies[spriteOrder[i]];
-    const sx = e.x - player.x;
-    const sy = e.y - player.y;
+    const oi = spriteOrder[i];
+    let tex, tw, th, sizeFactor, wx, wy;
+    if (oi < nE) {
+      const e = enemies[oi];
+      tex = (e.fast ? POSES_FAST : POSES)[e.pose];
+      tw = SPR_W;
+      th = SPR_H;
+      sizeFactor = 0.82; // el imp no llega al techo
+      wx = e.x;
+      wy = e.y;
+    } else {
+      const it = items[oi - nE];
+      tex = it.tex;
+      tw = it.texW;
+      th = it.texH;
+      sizeFactor = it.sizeFactor;
+      wx = it.x;
+      wy = it.y;
+    }
+    const sx = wx - player.x;
+    const sy = wy - player.y;
     // Espacio cámara: transformY es la profundidad (compara con el z-buffer).
     const transformX = invDet * (dirY * sx - dirX * sy);
     const transformY = invDet * (-planeY * sx + planeX * sy);
     if (transformY < 0.15) continue;
 
-    const tex = POSES[e.pose];
     const cellH = H / transformY;              // alto de una celda a esa distancia
-    const sprH = (cellH * 0.82) | 0;           // el imp no llega al techo
+    const sprH = (cellH * sizeFactor) | 0;
     if (sprH < 2) continue;
-    const sprW = (sprH * (SPR_W / SPR_H)) | 0;
+    const sprW = (sprH * (tw / th)) | 0;
     if (sprW < 1) continue;
 
-    // Pies apoyados en el suelo: alineados con la base de la celda.
+    // Base apoyada en el suelo: alineada con la base de la celda.
     const floorY = ((H + cellH) / 2) | 0;
     const y0 = floorY - sprH;
     const screenX = ((W / 2) * (1 + transformX / transformY)) | 0;
@@ -487,10 +610,10 @@ function drawSprites(player, dirX, dirY, planeX, planeY, enemies) {
 
     for (let x = xStart; x < xEnd; x++) {
       if (transformY >= zbuffer[x]) continue; // columna tapada por una pared
-      const texX = (((x - x0) * SPR_W) / sprW) | 0;
+      const texX = (((x - x0) * tw) / sprW) | 0;
       for (let y = yStart; y < yEnd; y++) {
-        const texY = (((y - y0) * SPR_H) / sprH) | 0;
-        const pix = tex[texY * SPR_W + texX];
+        const texY = (((y - y0) * th) / sprH) | 0;
+        const pix = tex[texY * tw + texX];
         if (pix === 0) continue; // transparente
         const r = ((pix & 0xff) * lightI) >> 8;
         const g = (((pix >> 8) & 0xff) * lightI) >> 8;

@@ -6,6 +6,9 @@
 //   sensibilidad → radianes acumulados en player.turnImpulse).
 // - Botón de disparo fijo en la esquina inferior derecha. Un toque que
 //   empieza sobre el botón NUNCA gira la cámara.
+// - Botón pequeño '1/2' sobre el de disparo: cambia de arma. Solo encola la
+//   intención (touch.switchQueued); weapon.js la consume y lo habilita
+//   (weaponBtnEnabled) cuando el jugador ya tiene la escopeta.
 // - Multi-touch real: cada rol (joystick / giro / disparo) guarda el
 //   identifier de su toque; touchend/touchcancel liberan solo ese toque.
 //
@@ -42,6 +45,12 @@ export const touch = {
   fireX: 0,
   fireY: 0,
   fireRadius: 0,
+  // Botón de cambio de arma (encima del de disparo).
+  weaponBtnEnabled: false, // lo activa weapon.js al recoger la escopeta
+  switchQueued: false,     // tap pendiente de consumir por weapon.js
+  weaponX: 0,
+  weaponY: 0,
+  weaponRadius: 0,
 };
 
 // Un identifier por rol; -1 = libre. (Los identifiers táctiles son >= 0.)
@@ -57,12 +66,21 @@ function layout() {
   const margin = h * FIRE_MARGIN_FRAC;
   touch.fireX = window.innerWidth - margin - touch.fireRadius;
   touch.fireY = h - margin - touch.fireRadius;
+  touch.weaponRadius = touch.fireRadius * 0.55;
+  touch.weaponX = touch.fireX;
+  touch.weaponY = touch.fireY - touch.fireRadius - touch.weaponRadius - h * 0.02;
 }
 
 function insideFire(x, y) {
   const dx = x - touch.fireX;
   const dy = y - touch.fireY;
   return dx * dx + dy * dy <= touch.fireRadius * touch.fireRadius;
+}
+
+function insideWeaponBtn(x, y) {
+  const dx = x - touch.weaponX;
+  const dy = y - touch.weaponY;
+  return dx * dx + dy * dy <= touch.weaponRadius * touch.weaponRadius;
 }
 
 function updateJoystick(x, y) {
@@ -104,7 +122,11 @@ function onTouchStart(e) {
     const t = e.changedTouches[i];
     const x = t.clientX;
     const y = t.clientY;
-    if (fireId === -1 && insideFire(x, y)) {
+    if (touch.weaponBtnEnabled && insideWeaponBtn(x, y)) {
+      // Tap de cambio de arma: se encola y el toque no adquiere ningún rol
+      // (mantenerlo o arrastrarlo no hace nada más).
+      touch.switchQueued = true;
+    } else if (fireId === -1 && insideFire(x, y)) {
       fireId = t.identifier;
       touch.firePressed = true;
     } else if (joyId === -1 && x < half) {

@@ -1,12 +1,16 @@
 // Doom Celular — game loop y orquestación.
-// Iteración 3: combate — enemigos con IA, pistola hitscan, vida del jugador,
-// HUD estilo Doom y pantallas de muerte / victoria con reinicio.
+// Iteración 6: campaña de 3 niveles con puertas, ítems, escopeta e
+// intermisiones. La salida ('X') de cada mapa lleva al siguiente; salud,
+// balas y armas se conservan entre niveles. Morir reinicia el nivel actual
+// con 100 de salud y el equipo con el que se entró (snapshot al entrar).
 
-import { level1 } from './maps.js';
+import { levels } from './maps.js';
 import * as raycaster from './raycaster.js';
 import { player, spawn, update as updatePlayer } from './player.js';
 import { initTouch, touch } from './touch.js';
-import { enemies, update as updateEnemies, reset as resetEnemies, allDead } from './enemies.js';
+import { enemies, update as updateEnemies, loadEnemies, countKills } from './enemies.js';
+import * as doors from './doors.js';
+import * as items from './items.js';
 import * as weapon from './weapon.js';
 import * as hud from './hud.js';
 
@@ -19,33 +23,97 @@ const ctx = canvas.getContext('2d');
 const RENDER_HEIGHT = 180;
 let renderWidth = 320;
 
-const map = level1;
-spawn(map);
 initTouch(canvas);
 weapon.initWeapon(canvas);
 
-// Depuración: expone jugador y enemigos para inspección / tests.
+// Estado de la campaña. phase: playing | dead | intermission | end.
+const state = {
+  phase: 'playing',
+  levelIndex: 0,
+  map: levels[0],
+  fps: 0,
+};
+
+let endTimer = 0;   // evita avanzar por el mismo toque que te mató/ganó
+let levelTime = 0;  // tiempo en el nivel actual
+let nameTimer = 0;  // segundos que le quedan al rótulo con el nombre del nivel
+
+// Estadísticas del último nivel completado (para la intermisión) y totales.
+let lastKills = 0;
+let lastTotal = 0;
+let lastTime = 0;
+let totalKills = 0;
+let totalEnemies = 0;
+let totalTime = 0;
+
+// Equipo con el que se ENTRÓ al nivel: se restaura al morir.
+const snapshot = { ammo: weapon.weapon.ammo, hasShotgun: false, current: 0 };
+
+function loadLevel(index, hp) {
+  state.levelIndex = index;
+  state.map = levels[index];
+  doors.loadDoors(state.map);
+  items.loadItems(state.map);
+  loadEnemies(state.map);
+  spawn(state.map);
+  player.hp = hp;
+  snapshot.ammo = weapon.weapon.ammo;
+  snapshot.hasShotgun = weapon.weapon.hasShotgun;
+  snapshot.current = weapon.weapon.current;
+  state.phase = 'playing';
+  endTimer = 0;
+  levelTime = 0;
+  nameTimer = 3;
+}
+loadLevel(0, 100);
+
+// Depuración: expone el estado para inspección / tests.
 window.player = player;
 window.enemies = enemies;
+window.__game = { state, weapon: weapon.weapon, items: items.items, touch };
 
-// Fase de la partida una vez iniciada: jugando, muerto o nivel limpio.
-let phase = 'playing';
-let endTimer = 0; // evita reiniciar por el mismo toque que te mató/ganó
-
-function resetLevel() {
-  spawn(map);
-  resetEnemies();
-  weapon.reset();
-  phase = 'playing';
+function completeLevel() {
+  lastKills = countKills();
+  lastTotal = enemies.length;
+  lastTime = levelTime;
+  totalKills += lastKills;
+  totalEnemies += lastTotal;
+  totalTime += lastTime;
+  state.phase = state.levelIndex === levels.length - 1 ? 'end' : 'intermission';
   endTimer = 0;
+  window.__audio?.playVictory?.();
 }
 
-function tryRestart() {
-  if (started && phase !== 'playing' && endTimer > 0.8) resetLevel();
+function nextLevel() {
+  loadLevel(state.levelIndex + 1, player.hp);
 }
-canvas.addEventListener('touchstart', tryRestart, { passive: true });
-canvas.addEventListener('click', tryRestart);
-window.addEventListener('keydown', tryRestart);
+
+function restartEpisode() {
+  totalKills = 0;
+  totalEnemies = 0;
+  totalTime = 0;
+  weapon.reset();
+  loadLevel(0, 100);
+}
+
+function retryLevel() {
+  // Restaurar el equipo de entrada ANTES de recargar: el snapshot nuevo
+  // queda igual y morir varias veces seguidas no acumula ni pierde nada.
+  weapon.weapon.ammo = snapshot.ammo;
+  weapon.weapon.hasShotgun = snapshot.hasShotgun;
+  weapon.weapon.current = snapshot.current;
+  loadLevel(state.levelIndex, 100);
+}
+
+function tryAdvance() {
+  if (!started) return;
+  if (state.phase === 'dead' && endTimer > 0.8) retryLevel();
+  else if (state.phase === 'intermission' && endTimer > 0.4) nextLevel();
+  else if (state.phase === 'end' && endTimer > 0.8) restartEpisode();
+}
+canvas.addEventListener('touchstart', tryAdvance, { passive: true });
+canvas.addEventListener('click', tryAdvance);
+window.addEventListener('keydown', tryAdvance);
 
 function resize() {
   const aspect = window.innerWidth / window.innerHeight;
@@ -92,46 +160,62 @@ let frames = 0;
 let fpsTime = 0;
 
 // --- Game loop ---
-let lastTime = 0;
+let lastFrameTime = 0;
 const TAU = Math.PI * 2;
 
 function frame(time) {
-  const dt = Math.min((time - lastTime) / 1000, 0.1);
-  lastTime = time;
+  const dt = Math.min((time - lastFrameTime) / 1000, 0.1);
+  lastFrameTime = time;
 
   frames++;
   fpsTime += dt;
   if (fpsTime >= 0.5) {
     fps = Math.round(frames / fpsTime);
+    state.fps = fps;
     frames = 0;
     fpsTime = 0;
   }
 
   if (started) {
-    if (phase === 'playing') {
-      updatePlayer(map, dt);
-      updateEnemies(map, dt);
-      weapon.update(map, dt);
+    if (state.phase === 'playing') {
+      levelTime += dt;
+      if (nameTimer > 0) nameTimer -= dt;
+      updatePlayer(state.map, dt);
+      doors.update(state.map, dt);
+      updateEnemies(state.map, dt);
+      weapon.update(state.map, dt);
+      items.update();
       if (player.hp <= 0) {
-        phase = 'dead';
+        state.phase = 'dead';
+        endTimer = 0;
         window.__audio?.playerDeath?.();
-      } else if (allDead()) {
-        phase = 'victory';
-        window.__audio?.playVictory?.();
+      } else if (doors.checkExit(state.map)) {
+        completeLevel();
       }
     } else {
       endTimer += dt;
+      // La intermisión avanza sola a los 2 s (o antes con un toque).
+      if (state.phase === 'intermission' && endTimer >= 2) nextLevel();
     }
   }
 
   // Orden de dibujo: mundo (paredes + sprites con z-buffer) → arma → HUD →
   // pantallas de fin → controles táctiles y FPS.
-  raycaster.render(ctx, player, map, enemies);
+  raycaster.render(ctx, player, state.map, enemies, items.items);
   if (started) {
-    if (phase !== 'dead') weapon.render(ctx, renderWidth, RENDER_HEIGHT);
+    if (state.phase === 'playing' || state.phase === 'intermission') {
+      weapon.render(ctx, renderWidth, RENDER_HEIGHT);
+    }
     hud.render(ctx, renderWidth, RENDER_HEIGHT, dt);
-    if (phase === 'dead') hud.renderDeath(ctx, renderWidth, RENDER_HEIGHT, dt);
-    else if (phase === 'victory') hud.renderVictory(ctx, renderWidth, RENDER_HEIGHT, dt);
+    if (state.phase === 'playing' && nameTimer > 0) {
+      hud.renderLevelName(ctx, renderWidth, RENDER_HEIGHT, state.map.name, nameTimer);
+    } else if (state.phase === 'dead') {
+      hud.renderDeath(ctx, renderWidth, RENDER_HEIGHT, dt);
+    } else if (state.phase === 'intermission') {
+      hud.renderIntermission(ctx, renderWidth, RENDER_HEIGHT, dt, state.map.name, lastKills, lastTotal, lastTime);
+    } else if (state.phase === 'end') {
+      hud.renderEnd(ctx, renderWidth, RENDER_HEIGHT, dt, totalKills, totalEnemies, totalTime);
+    }
   }
   drawOverlay();
 
@@ -179,6 +263,28 @@ function drawTouchControls() {
   ctx.beginPath();
   ctx.arc(fx, fy, fr * 0.28, 0, TAU);
   ctx.fill();
+  ctx.globalAlpha = 0.35;
+
+  // Botón de cambio de arma: solo cuando ya hay escopeta que alternar.
+  // Muestra el número del arma activa (1 pistola, 2 escopeta).
+  if (touch.weaponBtnEnabled) {
+    const wr = touch.weaponRadius * sy;
+    const wx = touch.weaponX * sx;
+    const wy = touch.weaponY * sy;
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = '#243248';
+    ctx.beginPath();
+    ctx.arc(wx, wy, wr, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = '#f0d8b0';
+    ctx.beginPath();
+    ctx.arc(wx, wy, wr, 0, TAU);
+    ctx.stroke();
+    ctx.fillStyle = '#f0d8b0';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(weapon.weapon.current === 1 ? '2' : '1', wx, wy + 3);
+  }
 
   ctx.globalAlpha = 1;
 }
