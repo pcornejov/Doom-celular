@@ -15,7 +15,7 @@
 //    ya instalaron seguirían con los archivos antiguos para siempre.
 // ============================================================================
 
-const VERSION = 'v8';
+const VERSION = 'v8b';
 const CACHE_NAME = `doomcel-${VERSION}`;
 
 const PRECACHE = [

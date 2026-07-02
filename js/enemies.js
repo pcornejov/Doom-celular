@@ -173,6 +173,7 @@ export function update(map, dt) {
         if (dist < SIGHT_DIST && lineOfSight(map, e.x, e.y, player.x, player.y)) {
           e.state = STATE.CHASE;
           e.stateTime = 0;
+          window.__audio?.playAlert?.(e.x, e.y); // gruñido posicional "¡te vio!"
         }
         break;
 

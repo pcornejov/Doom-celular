@@ -41,7 +41,7 @@ export function update(map, dt) {
     if (!d.opening) {
       if (!playerUses(d.cx, d.cy)) continue;
       d.opening = true;
-      window.__audio?.playDoor?.();
+      window.__audio?.playDoor?.(d.cx + 0.5, d.cy + 0.5);
     }
     d.prog += dt / OPEN_TIME;
     if (d.prog >= 1) {

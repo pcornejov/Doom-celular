@@ -1,4 +1,9 @@
 // Doom Celular — Iteración 4: música y efectos de sonido con Web Audio API.
+// Iteración 8b: sonido posicional estéreo — los efectos con posición (x, y)
+// se panean según el ángulo relativo al jugador (StereoPannerNode, con caída
+// limpia a mono en Safari viejo) y se atenúan con la distancia. Los efectos
+// sin posición (arma propia, dolor/muerte del jugador, victoria, música)
+// quedan centrados y a volumen normal, como siempre.
 //
 // Módulo autónomo: define window.__audio (efectos + control de música/mute) y
 // window.__onFirstGesture (desbloqueo del AudioContext en el primer gesto,
@@ -12,6 +17,8 @@
 //   AudioContext.currentTime (look-ahead), no con requestAnimationFrame.
 // - resume() también en visibilitychange→visible por si iOS suspende.
 // - Mute persistido en localStorage ('doomcel_mute').
+
+import { player } from './player.js';
 
 const MASTER_LEVEL = 0.9; // nivel maestro (con limitador detrás)
 const MUSIC_LEVEL = 0.35; // música ~ -8 dB por debajo de los efectos
@@ -120,6 +127,41 @@ function sweep(t, type, from, to, peak, dur, bus, filterFreq) {
   return { osc, filter, gain: g };
 }
 
+// --- Sonido posicional -------------------------------------------------------
+//
+// Los efectos con posición (x, y) se panean según el ángulo relativo a la
+// mirada del jugador y se atenúan con la distancia. Devuelve un GainNode ya
+// conectado al bus de efectos a través de un StereoPannerNode; los efectos
+// pasan ese nodo como "bus" a noiseBurst/sweep. Si el navegador no tiene
+// StereoPanner (Safari viejo), cae limpiamente a mono centrado.
+function posNode(x, y) {
+  const g = ctx.createGain();
+  if (x === undefined || y === undefined) {
+    // Sin posición: centrado y a volumen normal, como siempre.
+    g.connect(sfxBus);
+    return g;
+  }
+  const dx = x - player.x;
+  const dy = y - player.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  // Atenuación por distancia con piso 0.15: nada queda inaudible en el rango.
+  g.gain.value = Math.max(0.15, 1 / (1 + dist * 0.22));
+  if (typeof ctx.createStereoPanner === 'function') {
+    const panner = ctx.createStereoPanner();
+    // sin(ángulo relativo) → -1 izquierda / +1 derecha. ×0.8: no llega a
+    // silenciar del todo un canal, que es fatigante con auriculares.
+    const ang = Math.atan2(dy, dx) - player.angle;
+    let pan = Math.sin(ang) * 0.8;
+    if (pan < -1) pan = -1; else if (pan > 1) pan = 1;
+    panner.pan.value = pan;
+    g.connect(panner);
+    panner.connect(sfxBus);
+  } else {
+    g.connect(sfxBus);
+  }
+  return g;
+}
+
 // --- Límite de voces: máximo ~8 disparos/s por efecto ------------------------
 
 const lastFire = Object.create(null);
@@ -141,19 +183,22 @@ function playShot() {
   sweep(t, 'triangle', 150, 60, 0.7, 0.12, sfxBus);
 }
 
-// Impacto carnoso: ruido bandpass estrecho ~400 Hz + thud grave.
-function playHit() {
+// Impacto carnoso: ruido bandpass estrecho ~400 Hz + thud grave. Posicional.
+function playHit(x, y) {
   if (!allow('hit')) return;
   const t = ctx.currentTime;
-  noiseBurst(t, 'bandpass', 400, 2, 0.7, 0.08, sfxBus);
-  sweep(t, 'sine', 160, 70, 0.5, 0.09, sfxBus);
+  const bus = posNode(x, y);
+  noiseBurst(t, 'bandpass', 400, 2, 0.7, 0.08, bus);
+  sweep(t, 'sine', 160, 70, 0.5, 0.09, bus);
 }
 
 // Muerte de enemigo: gruñido sawtooth descendente con vibrato rápido + ruido.
-function playEnemyDeath() {
+// Posicional: suena por el lado donde cae el imp.
+function playEnemyDeath(x, y) {
   if (!allow('enemyDeath')) return;
   const t = ctx.currentTime;
-  const v = sweep(t, 'sawtooth', 220, 50, 0.6, 0.4, sfxBus, 1200);
+  const bus = posNode(x, y);
+  const v = sweep(t, 'sawtooth', 220, 50, 0.6, 0.4, bus, 1200);
   // Vibrato: LFO sobre la frecuencia del oscilador principal.
   const lfo = ctx.createOscillator();
   lfo.frequency.value = 24;
@@ -163,7 +208,44 @@ function playEnemyDeath() {
   lfoGain.connect(v.osc.frequency);
   lfo.start(t);
   lfo.stop(t + 0.45);
-  noiseBurst(t, 'lowpass', 900, 0.7, 0.35, 0.35, sfxBus);
+  noiseBurst(t, 'lowpass', 900, 0.7, 0.35, 0.35, bus);
+}
+
+// Gruñido de alerta ("¡te vio!") al pasar un imp a persecución. Posicional.
+function playAlert(x, y) {
+  if (!allow('alert')) return;
+  const t = ctx.currentTime;
+  const bus = posNode(x, y);
+  sweep(t, 'sawtooth', 90, 70, 0.5, 0.25, bus, 700);
+  noiseBurst(t, 'bandpass', 500, 1.2, 0.3, 0.2, bus);
+}
+
+// Lanzamiento de bola de fuego: silbido ascendente breve. Posicional.
+function playFireball(x, y) {
+  if (!allow('fireball')) return;
+  const t = ctx.currentTime;
+  const bus = posNode(x, y);
+  sweep(t, 'sawtooth', 320, 620, 0.35, 0.22, bus, 1600);
+  noiseBurst(t, 'bandpass', 1200, 1.5, 0.22, 0.2, bus);
+}
+
+// Impacto de bola de fuego: chisporroteo corto. Posicional.
+function playFireballHit(x, y) {
+  if (!allow('fireballHit')) return;
+  const t = ctx.currentTime;
+  const bus = posNode(x, y);
+  noiseBurst(t, 'bandpass', 800, 1.2, 0.5, 0.14, bus);
+  sweep(t, 'triangle', 240, 90, 0.4, 0.14, bus);
+}
+
+// Explosión de barril: golpe grave largo + ruido rugiente. Posicional y fuerte.
+function playExplosion(x, y) {
+  if (!allow('explosion')) return;
+  const t = ctx.currentTime;
+  const bus = posNode(x, y);
+  sweep(t, 'sine', 160, 30, 1.0, 0.5, bus);
+  sweep(t, 'sawtooth', 220, 50, 0.7, 0.45, bus, 900);
+  noiseBurst(t, 'lowpass', 700, 0.6, 0.7, 0.5, bus);
 }
 
 // Dolor del jugador: quejido square corto y descendente.
@@ -196,12 +278,13 @@ function playVictory() {
   }
 }
 
-// Extras para futuros hooks (puertas, ítems, pasos).
-function playDoor() {
+// Puerta al abrirse: chirrido grave. Posicional (suena por donde está).
+function playDoor(x, y) {
   if (!allow('door')) return;
   const t = ctx.currentTime;
-  sweep(t, 'square', 60, 110, 0.3, 0.5, sfxBus, 500);
-  noiseBurst(t, 'lowpass', 300, 0.7, 0.25, 0.5, sfxBus);
+  const bus = posNode(x, y);
+  sweep(t, 'square', 60, 110, 0.3, 0.5, bus, 500);
+  noiseBurst(t, 'lowpass', 300, 0.7, 0.25, 0.5, bus);
 }
 function playPickup() {
   if (!allow('pickup')) return;
@@ -435,6 +518,10 @@ window.__audio = {
   playShot,
   playHit,
   playEnemyDeath,
+  playAlert,
+  playFireball,
+  playFireballHit,
+  playExplosion,
   playerHurt,
   playerDeath,
   playVictory,
