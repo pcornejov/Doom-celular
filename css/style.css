@@ -37,11 +37,29 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: radial-gradient(ellipse at center, #200500 0%, #000 85%);
+  /* Resplandor infernal arriba + viñeta que se hunde en negro por los bordes. */
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 30%, rgba(120, 26, 4, 0.55) 0%, rgba(0, 0, 0, 0) 60%),
+    radial-gradient(ellipse at center, #200500 0%, #000 78%);
   touch-action: none;
   cursor: pointer;
   font-family: 'Courier New', monospace;
   text-align: center;
+}
+
+/* Scanlines retro sutiles sobre toda la pantalla de inicio. */
+#start-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.22) 0px,
+    rgba(0, 0, 0, 0.22) 2px,
+    transparent 2px,
+    transparent 4px
+  );
 }
 
 #start-overlay.hidden {
@@ -67,6 +85,28 @@ html, body {
   color: rgba(240, 216, 176, 0.5);
   font-size: clamp(0.7rem, 2.5vw, 1rem);
   letter-spacing: 0.2em;
+}
+
+/* Subtítulo del episodio, justo bajo el logo. */
+#start-overlay .episode {
+  color: #c07830;
+  font-size: clamp(0.75rem, 3vw, 1.25rem);
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  margin-top: -8px;
+  text-shadow: 2px 2px 0 #000;
+}
+
+/* Línea de 'copyright' falsa, pegada abajo estilo pantalla de título retro. */
+#start-overlay .copyright {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  color: rgba(240, 216, 176, 0.35);
+  font-size: clamp(0.55rem, 2vw, 0.8rem);
+  letter-spacing: 0.1em;
+  padding: 0 12px;
 }
 
 @keyframes blink {

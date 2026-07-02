@@ -28,13 +28,19 @@ function pack(r, g, b) {
 const SPR_W = 24;
 const SPR_H = 32;
 
-function bakeSprite(draw) {
+// Hornea un dibujo hecho con canvas 2D a un Uint32Array en el formato ABGR
+// del buffer de render. Lo usan tanto los sprites como las texturas de pared.
+function bake(w, h, draw) {
   const c = document.createElement('canvas');
-  c.width = SPR_W;
-  c.height = SPR_H;
+  c.width = w;
+  c.height = h;
   const g = c.getContext('2d', { willReadFrequently: true });
   draw(g);
-  return new Uint32Array(g.getImageData(0, 0, SPR_W, SPR_H).data.buffer);
+  return new Uint32Array(g.getImageData(0, 0, w, h).data.buffer);
+}
+
+function bakeSprite(draw) {
+  return bake(SPR_W, SPR_H, draw);
 }
 
 // Imp marrón/rojizo: cuernos, ojos brillantes, pecho rojo, garras.
@@ -119,6 +125,173 @@ const POSES = [
     g.fillRect(0, 0, SPR_W, SPR_H);
   }),
   bakeSprite(drawCorpse),
+];
+
+// ---------------------------------------------------------------------------
+// Texturas de pared: 32×32, procedurales, horneadas UNA VEZ al cargar con el
+// mismo mecanismo que los sprites. Cada tipo parte de su color base de
+// WALL_COLORS (la paleta sigue viviendo en maps.js) y añade detalle encima.
+// ---------------------------------------------------------------------------
+
+const TEX = 32;        // lado de la textura (potencia de 2)
+const TEX_MASK = 31;   // para envolver texY con AND
+const TEX_SHIFT = 5;   // texY * 32 == texY << 5
+
+// RNG determinista (LCG): el moteado sale igual en cada carga.
+let texSeed = 0x1e51;
+function trnd() {
+  texSeed = (texSeed * 1103515245 + 12345) & 0x7fffffff;
+  return texSeed / 0x7fffffff;
+}
+
+// Color CSS a partir de un base [r,g,b] y un factor de brillo (solo al hornear).
+function css(base, f) {
+  let r = (base[0] * f) | 0;
+  let g = (base[1] * f) | 0;
+  let b = (base[2] * f) | 0;
+  if (r > 255) r = 255;
+  if (g > 255) g = 255;
+  if (b > 255) b = 255;
+  return `rgb(${r},${g},${b})`;
+}
+
+// Tipo 1 — piedra gris: bloques irregulares con juntas oscuras y moteado.
+function drawStoneTex(g, base) {
+  g.fillStyle = css(base, 0.5); // juntas (queda como fondo)
+  g.fillRect(0, 0, TEX, TEX);
+  for (let row = 0; row < 4; row++) {
+    let x = row & 1 ? -3 : 0; // hiladas alternadas para que no casen las juntas
+    while (x < TEX) {
+      const w = 6 + ((trnd() * 6) | 0);
+      g.fillStyle = css(base, 0.88 + trnd() * 0.26);
+      g.fillRect(x + 1, row * 8 + 1, w - 1, 6);
+      x += w;
+    }
+  }
+  for (let i = 0; i < 70; i++) {
+    g.fillStyle = css(base, trnd() < 0.5 ? 0.72 : 1.18);
+    g.fillRect((trnd() * TEX) | 0, (trnd() * TEX) | 0, 1, 1);
+  }
+}
+
+// Tipo 2 — ladrillo: hiladas marrón/rojizas alternadas sobre mortero.
+function drawBrickTex(g, base) {
+  g.fillStyle = 'rgb(58,48,42)'; // mortero
+  g.fillRect(0, 0, TEX, TEX);
+  for (let row = 0; row < 8; row++) {
+    const off = row & 1 ? 4 : 0;
+    for (let col = -1; col < 4; col++) {
+      const f = 0.82 + trnd() * 0.36;
+      g.fillStyle = css(base, f);
+      g.fillRect(col * 8 + off, row * 4, 7, 3);
+      g.fillStyle = css(base, f * 0.68); // sombra en la base del ladrillo
+      g.fillRect(col * 8 + off, row * 4 + 2, 7, 1);
+    }
+  }
+}
+
+// Tipo 3 — metal: placas azul-gris con remaches y franja de advertencia.
+function drawMetalTex(g, base) {
+  g.fillStyle = css(base, 0.92);
+  g.fillRect(0, 0, TEX, TEX);
+  for (let i = 0; i < 60; i++) { // vetas de cepillado
+    g.fillStyle = css(base, 0.82 + trnd() * 0.22);
+    g.fillRect((trnd() * TEX) | 0, (trnd() * TEX) | 0, 1, 2 + ((trnd() * 3) | 0));
+  }
+  // Juntas entre placas (arriba, medio, abajo) con canto iluminado.
+  g.fillStyle = css(base, 0.45);
+  g.fillRect(0, 0, TEX, 1);
+  g.fillRect(0, 15, TEX, 2);
+  g.fillRect(0, 31, TEX, 1);
+  g.fillStyle = css(base, 1.3);
+  g.fillRect(0, 1, TEX, 1);
+  g.fillRect(0, 17, TEX, 1);
+  // Franja de advertencia amarilla/negra en la placa inferior.
+  for (let x = 0; x < TEX; x += 8) {
+    g.fillStyle = '#b0951e';
+    g.fillRect(x, 22, 4, 4);
+    g.fillStyle = '#181818';
+    g.fillRect(x + 4, 22, 4, 4);
+  }
+  g.fillStyle = css(base, 0.55);
+  g.fillRect(0, 21, TEX, 1);
+  g.fillRect(0, 26, TEX, 1);
+  // Remaches de la placa superior.
+  for (let x = 3; x < TEX; x += 8) {
+    g.fillStyle = css(base, 1.45);
+    g.fillRect(x, 4, 2, 2);
+    g.fillRect(x, 10, 2, 2);
+    g.fillStyle = css(base, 0.6);
+    g.fillRect(x + 1, 5, 1, 1);
+    g.fillRect(x + 1, 11, 1, 1);
+  }
+}
+
+// Tipo 4 — piedra roja infernal: vetas oscuras serpenteantes ('sangre/marte').
+function drawRedTex(g, base) {
+  g.fillStyle = css(base, 0.95);
+  g.fillRect(0, 0, TEX, TEX);
+  for (let i = 0; i < 90; i++) { // moteado rugoso
+    g.fillStyle = css(base, trnd() < 0.5 ? 0.72 : 1.22);
+    g.fillRect((trnd() * TEX) | 0, (trnd() * TEX) | 0, 2, 1);
+  }
+  for (let v = 0; v < 5; v++) { // vetas: caminatas verticales que serpentean
+    let x = (trnd() * TEX) | 0;
+    const f = 0.4 + trnd() * 0.15;
+    for (let y = 0; y < TEX; y++) {
+      g.fillStyle = css(base, f);
+      g.fillRect(x & TEX_MASK, y, 1, 1);
+      if (trnd() < 0.45) x += trnd() < 0.5 ? -1 : 1;
+    }
+  }
+  g.fillStyle = css(base, 1.35); // brasas sueltas
+  for (let i = 0; i < 8; i++) {
+    g.fillRect((trnd() * TEX) | 0, (trnd() * TEX) | 0, 1, 1);
+  }
+}
+
+// Tipo 5 — placas verde militar con manchas de óxido y musgo.
+function drawGreenTex(g, base) {
+  g.fillStyle = css(base, 1);
+  g.fillRect(0, 0, TEX, TEX);
+  // Rejilla de placas 16×16: junta oscura y canto iluminado.
+  g.fillStyle = css(base, 0.5);
+  g.fillRect(0, 0, TEX, 1);
+  g.fillRect(0, 15, TEX, 1);
+  g.fillRect(0, 31, TEX, 1);
+  g.fillRect(0, 0, 1, TEX);
+  g.fillRect(15, 0, 1, TEX);
+  g.fillRect(31, 0, 1, TEX);
+  g.fillStyle = css(base, 1.2);
+  g.fillRect(1, 1, 14, 1);
+  g.fillRect(17, 1, 14, 1);
+  g.fillRect(1, 16, 14, 1);
+  g.fillRect(17, 16, 14, 1);
+  // Manchas: óxido marrón y musgo verde claro.
+  for (let i = 0; i < 26; i++) {
+    g.fillStyle = trnd() < 0.5 ? 'rgb(104,74,40)' : css(base, 1.3);
+    g.fillRect((trnd() * TEX) | 0, (trnd() * TEX) | 0, 1 + ((trnd() * 2) | 0), 1 + ((trnd() * 2) | 0));
+  }
+  // Tornillos en las esquinas interiores de cada placa.
+  g.fillStyle = css(base, 1.45);
+  for (let py = 3; py < TEX; py += 16) {
+    for (let px = 3; px < TEX; px += 16) {
+      g.fillRect(px, py, 2, 2);
+      g.fillRect(px + 9, py, 2, 2);
+      g.fillRect(px, py + 9, 2, 2);
+      g.fillRect(px + 9, py + 9, 2, 2);
+    }
+  }
+}
+
+// Índice por tipo de pared (0 no se dibuja nunca: el DDA para en tipo > 0).
+const WALL_TEX = [
+  null,
+  bake(TEX, TEX, (g) => drawStoneTex(g, WALL_COLORS[1])),
+  bake(TEX, TEX, (g) => drawBrickTex(g, WALL_COLORS[2])),
+  bake(TEX, TEX, (g) => drawMetalTex(g, WALL_COLORS[3])),
+  bake(TEX, TEX, (g) => drawRedTex(g, WALL_COLORS[4])),
+  bake(TEX, TEX, (g) => drawGreenTex(g, WALL_COLORS[5])),
 ];
 
 // Buffers de ordenación por distancia (preasignados; insertion sort in-place).
@@ -213,15 +386,37 @@ export function render(ctx, player, map, enemies) {
     if (drawStart < 0) drawStart = 0;
     if (drawEnd > H) drawEnd = H;
 
-    // Sombreado: por distancia (niebla) y por orientación de la pared.
-    const base = WALL_COLORS[wallType];
+    // Coordenada fraccionaria del impacto dentro de la celda → columna de
+    // textura, con el flip clásico según cara y sentido del rayo para que la
+    // textura no salga espejada al rodear el bloque.
+    let wallX = side === 0
+      ? player.y + perpDist * rayDirY
+      : player.x + perpDist * rayDirX;
+    wallX -= Math.floor(wallX);
+    let texX = (wallX * TEX) | 0;
+    if ((side === 0 && rayDirX > 0) || (side === 1 && rayDirY < 0)) texX = TEX_MASK - texX;
+
+    // Sombreado: por distancia (niebla) y por orientación de la pared, como
+    // factor entero 0-256 que multiplica cada texel (igual que los sprites).
     let light = 1 - perpDist / FOG_DISTANCE;
     if (light < MIN_LIGHT) light = MIN_LIGHT;
     if (side === 1) light *= 0.72;
-    const color = pack((base[0] * light) | 0, (base[1] * light) | 0, (base[2] * light) | 0);
+    const lightI = (light * 256) | 0;
 
+    // texY avanza a paso fijo por columna dibujada (precalculado fuera del
+    // bucle); el AND con TEX_MASK envuelve la textura verticalmente.
+    const tex = WALL_TEX[wallType] || WALL_TEX[1];
+    const texStep = TEX / lineHeight;
+    let texPos = (drawStart - (H - lineHeight) / 2) * texStep;
+    let idx = drawStart * W + x;
     for (let y = drawStart; y < drawEnd; y++) {
-      buf32[y * W + x] = color;
+      const pix = tex[(((texPos | 0) & TEX_MASK) << TEX_SHIFT) | texX];
+      texPos += texStep;
+      const r = ((pix & 0xff) * lightI) >> 8;
+      const g = (((pix >> 8) & 0xff) * lightI) >> 8;
+      const b = (((pix >> 16) & 0xff) * lightI) >> 8;
+      buf32[idx] = (255 << 24) | (b << 16) | (g << 8) | r;
+      idx += W;
     }
   }
 

@@ -4,6 +4,7 @@
 
 import { player } from './player.js';
 import { weapon } from './weapon.js';
+import { enemies, STATE } from './enemies.js';
 
 const BAR_W = 132;
 const BAR_H = 14;
@@ -99,25 +100,47 @@ export function render(ctx, W, H, dt) {
   ctx.drawImage(face, ((W - 12) / 2) | 0, y0 + 1, 12, 12);
 }
 
-function endScreen(ctx, W, H, dt, bg, title, titleColor) {
+// Estadísticas de fin de partida: recuento barato sobre el array de enemigos
+// (8 elementos; solo se ejecuta en las pantallas de muerte / victoria).
+function countKills() {
+  let k = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    if (enemies[i].state === STATE.DEAD) k++;
+  }
+  return k;
+}
+
+function endScreen(ctx, W, H, dt, bg, title, titleColor, prompt) {
   blinkTime += dt;
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
+  // Viñeta barata: bandas oscuras arriba y abajo, estilo intermisión de Doom.
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, W, 26);
+  ctx.fillRect(0, H - 26, W, 26);
+
   ctx.textAlign = 'center';
   ctx.font = 'bold 18px monospace';
   ctx.fillStyle = titleColor;
-  ctx.fillText(title, W / 2, H / 2 - 6);
+  ctx.fillText(title, W / 2, H / 2 - 20);
+
+  // Estadísticas con la misma tipografía monospace del HUD.
+  ctx.font = 'bold 7px monospace';
+  ctx.fillStyle = '#c8b890';
+  ctx.fillText(`IMPS ELIMINADOS  ${countKills()}/${enemies.length}`, W / 2, H / 2 - 4);
+  ctx.fillText(`BALAS RESTANTES  ${weapon.ammo}`, W / 2, H / 2 + 6);
+
   if (blinkTime % 1 < 0.65) {
     ctx.font = 'bold 8px monospace';
     ctx.fillStyle = '#ffd870';
-    ctx.fillText('TOCA PARA REINTENTAR', W / 2, H / 2 + 12);
+    ctx.fillText(prompt, W / 2, H / 2 + 24);
   }
 }
 
 export function renderDeath(ctx, W, H, dt) {
-  endScreen(ctx, W, H, dt, 'rgba(90,0,0,0.55)', 'HAS MUERTO', '#ff2814');
+  endScreen(ctx, W, H, dt, 'rgba(90,0,0,0.55)', 'HAS MUERTO', '#ff2814', 'TOCA PARA REINTENTAR');
 }
 
 export function renderVictory(ctx, W, H, dt) {
-  endScreen(ctx, W, H, dt, 'rgba(10,40,10,0.55)', 'NIVEL LIMPIO', '#ffd870');
+  endScreen(ctx, W, H, dt, 'rgba(10,40,10,0.55)', 'NIVEL LIMPIO', '#ffd870', 'TOCA PARA VOLVER A JUGAR');
 }
