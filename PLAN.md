@@ -73,6 +73,10 @@ Los roles están definidos como subagentes de Claude Code en `.claude/agents/` p
 
 Regla de oro: **cada iteración termina con una versión jugable publicada en GitHub Pages**. Nunca se acumula trabajo sin desplegar.
 
+> **Estado**: iteraciones 0–4, 5a (pulido visual) y 6 completadas y en producción.
+> Pendiente 5b: ajuste fino de sensibilidad/dificultad con feedback de juego en
+> teléfonos reales.
+
 ### Iteración 0 — Esqueleto + despliegue funcionando 🏗️
 *Responsables: Programador + Jugabilidad móvil*
 

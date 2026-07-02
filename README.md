@@ -2,7 +2,9 @@
 
 Juego estilo Doom jugable desde el teléfono, con controles táctiles, hecho con un motor raycasting propio en JavaScript + Canvas 2D (sin frameworks, sin build) y desplegado en GitHub Pages.
 
-🎮 **Jugar**: https://pcornejov.github.io/Doom-celular/ *(disponible a partir de la Iteración 0)*
+🎮 **Jugar**: https://pcornejov.github.io/Doom-celular/
+
+Campaña de 3 niveles (E1M1–E1M3) con imps, escopeta, puertas, botiquines, música metal procedural y controles táctiles: joystick flotante (pulgar izquierdo), giro por arrastre (pulgar derecho) y botón de disparo. En desktop: WASD + flechas, Espacio dispara, 1/2 cambia de arma.
 
 ## Plan de trabajo
 
