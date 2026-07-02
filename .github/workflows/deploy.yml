@@ -3,10 +3,11 @@ name: Deploy a GitHub Pages
 on:
   push:
     # El entorno github-pages solo acepta despliegues desde la rama por
-    # defecto del repositorio; se incluye la rama de trabajo (actual rama
-    # por defecto) además de main para que cada iteración se publique sola.
+    # defecto del repositorio (hoy: la rama de trabajo). main se mantiene
+    # como espejo sin trigger para que su run fallido no cancele al bueno
+    # (grupo de concurrencia "pages"). Si la rama por defecto pasa a ser
+    # main, cambiar el trigger aquí.
     branches:
-      - main
       - claude/doom-mobile-game-plan-ls4iuw
   workflow_dispatch:
 
