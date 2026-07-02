@@ -12,6 +12,7 @@ import { player } from './player.js';
 import { touch } from './touch.js';
 import { cellAt } from './maps.js';
 import { enemies, hitEnemy, STATE } from './enemies.js';
+import { barrels, damageBarrel } from './barrels.js';
 
 export const MAX_AMMO = 99;
 const START_AMMO = 48;
@@ -215,14 +216,15 @@ function castWallDistance(map, x, y, rdx, rdy) {
   return side === 0 ? sideDistX - deltaDistX : sideDistY - deltaDistY;
 }
 
-// Un rayo hitscan: daña al primer enemigo vivo dentro del pasillo de impacto
-// y antes de la primera pared.
+// Un rayo hitscan: daña al primer blanco (enemigo vivo o barril) dentro del
+// pasillo de impacto y antes de la primera pared.
 function hitscan(map, angle, dmg) {
   const dirX = Math.cos(angle);
   const dirY = Math.sin(angle);
   const wallDist = castWallDistance(map, player.x, player.y, dirX, dirY);
 
   let best = null;
+  let bestBarrel = null;
   let bestForward = Infinity;
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i];
@@ -238,7 +240,24 @@ function hitscan(map, angle, dmg) {
       best = e;
     }
   }
-  if (best) hitEnemy(best, dmg);
+  // Los barriles explosivos también son blanco (mismo pasillo de impacto).
+  for (let i = 0; i < barrels.length; i++) {
+    const b = barrels[i];
+    if (!b.alive) continue;
+    const rx = b.x - player.x;
+    const ry = b.y - player.y;
+    const forward = rx * dirX + ry * dirY;
+    if (forward <= 0.1 || forward >= wallDist) continue;
+    const side = -rx * dirY + ry * dirX;
+    if (side > HIT_HALF_WIDTH || side < -HIT_HALF_WIDTH) continue;
+    if (forward < bestForward) {
+      bestForward = forward;
+      best = null;
+      bestBarrel = b;
+    }
+  }
+  if (bestBarrel) damageBarrel(bestBarrel, dmg);
+  else if (best) hitEnemy(best, dmg);
 }
 
 function firePistol(map) {

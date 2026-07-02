@@ -177,11 +177,12 @@ export function renderIntermission(ctx, W, H, dt, levelName, kills, total, time)
 }
 
 // Fin del episodio (tras E1M3): totales de toda la campaña y mejor marca
-// histórica (best = { t: segundos, k: % de bajas } o null si no hay récord).
-export function renderEnd(ctx, W, H, dt, kills, total, time, best, newBest) {
+// histórica DE LA DIFICULTAD JUGADA (best = { t: segundos, k: % de bajas }
+// o null si no hay récord).
+export function renderEnd(ctx, W, H, dt, kills, total, time, best, newBest, diffName) {
   endScreen(
     ctx, W, H, dt, 'rgba(10,40,10,0.6)', 'FIN DEL EPISODIO', '#2ec83e',
-    'HAS PURGADO EL AVERNO',
+    diffName ? `HAS PURGADO EL AVERNO — ${diffName}` : 'HAS PURGADO EL AVERNO',
     `IMPS ELIMINADOS  ${kills}/${total}`,
     `TIEMPO TOTAL  ${formatTime(time)}`,
     best ? `MEJOR MARCA  ${formatTime(best.t)} — ${best.k}%` : null,

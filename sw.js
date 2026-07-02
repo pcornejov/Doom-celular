@@ -15,7 +15,7 @@
 //    ya instalaron seguirían con los archivos antiguos para siempre.
 // ============================================================================
 
-const VERSION = 'v7';
+const VERSION = 'v8';
 const CACHE_NAME = `doomcel-${VERSION}`;
 
 const PRECACHE = [
@@ -34,6 +34,9 @@ const PRECACHE = [
   './js/doors.js',
   './js/items.js',
   './js/weapon.js',
+  './js/barrels.js',
+  './js/projectiles.js',
+  './js/difficulty.js',
   './js/hud.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

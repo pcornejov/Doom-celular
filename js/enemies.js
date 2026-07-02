@@ -4,14 +4,19 @@
 // por frame).
 //
 // Dos variantes: imp normal y imp rápido ('s', tinte azulado en el sprite):
-// más veloz y frágil, pega menos. Cada enemigo expone `pose` (0 de pie,
-// 1 atacando, 2 herido, 3 cadáver) y `fast` para que el raycaster elija el
-// bitmap sin conocer la lógica de estados.
+// más veloz y frágil, pega menos pero solo cuerpo a cuerpo (su amenaza es la
+// velocidad). El imp NORMAL además lanza bolas de fuego a media distancia
+// (estado CAST: 0.4 s en pose de ataque y dispara; ver projectiles.js).
+// Cada enemigo expone `pose` (0 de pie/andar A, 1 atacando, 2 herido,
+// 3 cadáver, 4 andar B) y `fast` para que el raycaster elija el bitmap sin
+// conocer la lógica de estados.
 
 import { cellAt } from './maps.js';
 import { player, damagePlayer } from './player.js';
+import { spawnFireball } from './projectiles.js';
+import { difficulty } from './difficulty.js';
 
-export const STATE = { IDLE: 0, CHASE: 1, ATTACK: 2, HURT: 3, DEAD: 4 };
+export const STATE = { IDLE: 0, CHASE: 1, ATTACK: 2, HURT: 3, DEAD: 4, CAST: 5 };
 
 const HP = 30;
 const HP_FAST = 20;
@@ -24,6 +29,15 @@ const ATTACK_EXIT = 1.6;    // vuelve a perseguir por encima de esta
 const ATTACK_PERIOD = 1.0;  // segundos entre golpes
 const ATTACK_WINDUP = 0.6;  // retardo del primer golpe al entrar en ataque
 const HURT_TIME = 0.3;      // stun al recibir daño
+
+// Bolas de fuego (solo imps normales)
+const FIRE_MIN_DIST = 2.5;  // no dispara más cerca (ahí prefiere el zarpazo)
+const FIRE_MAX_DIST = 9;    // ni más lejos
+const FIRE_PERIOD_MIN = 1.6; // el periodo se sortea en [1.6, 2.4] por disparo
+const FIRE_PERIOD_VAR = 0.8;
+const CAST_TIME = 0.4;      // segundos en pose de ataque antes de lanzar
+
+const WALK_RATE = 4;        // pasos por segundo del ciclo de andar
 
 const SEPARATION = 0.6;     // distancia mínima entre enemigos (repulsión)
 
@@ -45,6 +59,9 @@ export function loadEnemies(map) {
       pose: 0,
       stateTime: 0,
       attackTimer: 0,
+      animTime: 0, // fase del ciclo de andar
+      // Aleatorio por imp: los disparos del grupo no salen sincronizados.
+      fireTimer: FIRE_PERIOD_MIN + Math.random() * FIRE_PERIOD_VAR,
     });
   }
 }
@@ -64,12 +81,12 @@ export function hitEnemy(e, dmg) {
   if (e.hp <= 0) {
     e.state = STATE.DEAD;
     e.pose = 3;
-    window.__audio?.playEnemyDeath?.();
+    window.__audio?.playEnemyDeath?.(e.x, e.y);
   } else {
     e.state = STATE.HURT;
     e.pose = 2;
     e.stateTime = 0;
-    window.__audio?.playHit?.();
+    window.__audio?.playHit?.(e.x, e.y);
   }
 }
 
@@ -160,19 +177,51 @@ export function update(map, dt) {
         break;
 
       case STATE.CHASE: {
-        e.pose = 0;
         if (dist < ATTACK_DIST) {
           e.state = STATE.ATTACK;
           e.stateTime = 0;
           e.attackTimer = ATTACK_WINDUP;
           break;
         }
+        // Ataque a distancia (solo imps normales): cuando vence el periodo,
+        // con línea de visión y a distancia media, pasa a CAST. En PESADILLA
+        // el periodo corre un 30% más rápido (fireRateMul).
+        if (!e.fast) {
+          e.fireTimer -= dt * difficulty.fireRateMul;
+          if (
+            e.fireTimer <= 0 &&
+            dist >= FIRE_MIN_DIST && dist <= FIRE_MAX_DIST &&
+            lineOfSight(map, e.x, e.y, player.x, player.y)
+          ) {
+            e.state = STATE.CAST;
+            e.stateTime = 0;
+            e.pose = 1;
+            break;
+          }
+        }
+        // Ciclo de andar: alterna poses 0/4 a WALK_RATE pasos/s SOLO mientras
+        // se mueve (en chase siempre avanza hacia el jugador).
+        e.animTime += dt;
+        e.pose = ((e.animTime * WALK_RATE) | 0) & 1 ? 4 : 0;
         if (dist > 1e-6) {
-          const step = ((e.fast ? SPEED_FAST : SPEED) * dt) / dist;
+          const step = ((e.fast ? SPEED_FAST : SPEED) * difficulty.enemySpeedMul * dt) / dist;
           tryMoveEnemy(map, e, e.x + dx * step, e.y + dy * step);
         }
         break;
       }
+
+      case STATE.CAST:
+        // Quieto en pose de ataque CAST_TIME segundos y lanza la bola hacia
+        // la posición ACTUAL del jugador (sin predicción: esquivable).
+        e.pose = 1;
+        if (e.stateTime >= CAST_TIME) {
+          spawnFireball(e.x, e.y, player.x, player.y);
+          window.__audio?.playFireball?.(e.x, e.y);
+          e.fireTimer = FIRE_PERIOD_MIN + Math.random() * FIRE_PERIOD_VAR;
+          e.state = STATE.CHASE;
+          e.stateTime = 0;
+        }
+        break;
 
       case STATE.ATTACK:
         // Pose de zarpazo justo antes de golpear.
@@ -186,8 +235,9 @@ export function update(map, dt) {
         if (e.attackTimer <= 0) {
           e.attackTimer += ATTACK_PERIOD;
           if (dist < ATTACK_EXIT && lineOfSight(map, e.x, e.y, player.x, player.y)) {
-            // Normal 8-12, rápido 5-8.
-            damagePlayer(e.fast ? 5 + ((Math.random() * 4) | 0) : 8 + ((Math.random() * 5) | 0));
+            // Normal 8-12, rápido 5-8; escalado por la dificultad elegida.
+            const base = e.fast ? 5 + ((Math.random() * 4) | 0) : 8 + ((Math.random() * 5) | 0);
+            damagePlayer(Math.round(base * difficulty.dmgMul));
           }
         }
         break;

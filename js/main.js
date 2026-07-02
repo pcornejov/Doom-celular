@@ -12,7 +12,10 @@ import { enemies, update as updateEnemies, loadEnemies, countKills } from './ene
 import * as doors from './doors.js';
 import * as items from './items.js';
 import * as weapon from './weapon.js';
+import * as barrels from './barrels.js';
+import * as projectiles from './projectiles.js';
 import * as hud from './hud.js';
+import { difficulty, setDifficulty, storedDifficultyIndex } from './difficulty.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -56,17 +59,35 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // --- Mejor marca del episodio (localStorage) ---
-// Se guarda el mejor tiempo total y su % de bajas. Gana el tiempo más bajo.
+// Se guarda el mejor tiempo total y su % de bajas POR DIFICULTAD (clave
+// compuesta). Gana el tiempo más bajo. La marca antigua sin sufijo
+// ('doomcel_best') se migra como marca de HÁGANME DAÑO.
 const BEST_KEY = 'doomcel_best';
 let best = null;    // { t: segundos totales, k: % de bajas }
 let newBest = false; // el episodio recién terminado batió la marca
-try {
-  const raw = localStorage.getItem(BEST_KEY);
-  if (raw) {
-    const b = JSON.parse(raw);
-    if (b && typeof b.t === 'number' && typeof b.k === 'number') best = b;
-  }
-} catch (e) { /* sin storage: se juega sin récords */ }
+
+function bestKey() {
+  return `${BEST_KEY}_${difficulty.id}`;
+}
+
+function loadBest() {
+  best = null;
+  try {
+    let raw = localStorage.getItem(bestKey());
+    if (!raw && difficulty.id === 'normal') {
+      // Migración: la marca vieja cuenta como marca de HÁGANME DAÑO.
+      raw = localStorage.getItem(BEST_KEY);
+      if (raw) localStorage.setItem(bestKey(), raw);
+    }
+    if (raw) {
+      const b = JSON.parse(raw);
+      if (b && typeof b.t === 'number' && typeof b.k === 'number') best = b;
+    }
+  } catch (e) { /* sin storage: se juega sin récords */ }
+}
+
+setDifficulty(storedDifficultyIndex());
+loadBest();
 
 // Estadísticas del último nivel completado (para la intermisión) y totales.
 let lastKills = 0;
@@ -84,6 +105,8 @@ function loadLevel(index, hp) {
   state.map = levels[index];
   doors.loadDoors(state.map);
   items.loadItems(state.map);
+  barrels.loadBarrels(state.map);
+  projectiles.reset();
   loadEnemies(state.map);
   spawn(state.map);
   player.hp = hp;
@@ -101,8 +124,10 @@ loadLevel(0, 100);
 // Depuración: expone el estado para inspección / tests.
 window.player = player;
 window.enemies = enemies;
+window.barrels = barrels.barrels;
 window.__game = {
   state, weapon: weapon.weapon, items: items.items, touch,
+  fireballs: projectiles.fireballs, difficulty,
   get best() { return best; },
   get newBest() { return newBest; },
   get renderHeight() { return renderHeight; },
@@ -125,7 +150,7 @@ function completeLevel() {
     newBest = !best || totalTime < best.t;
     if (newBest) {
       best = { t: totalTime, k: pct };
-      try { localStorage.setItem(BEST_KEY, JSON.stringify(best)); } catch (e) { /* sin storage */ }
+      try { localStorage.setItem(bestKey(), JSON.stringify(best)); } catch (e) { /* sin storage */ }
     }
   }
 }
@@ -226,6 +251,36 @@ startOverlay.addEventListener('touchstart', (e) => {
 startOverlay.addEventListener('click', () => firstGesture(false));
 window.addEventListener('keydown', () => firstGesture(false));
 
+// --- Selector de dificultad (pantalla de inicio) ---
+// Tocar un botón NO inicia el juego (stopPropagation): solo cambia la
+// dificultad, la persiste y recarga la mejor marca de ESA dificultad.
+const diffButtons = startOverlay.querySelectorAll('#difficulty button');
+
+function selectDifficulty(index) {
+  setDifficulty(index);
+  loadBest();
+  newBest = false;
+  for (let i = 0; i < diffButtons.length; i++) {
+    diffButtons[i].classList.toggle('selected', Number(diffButtons[i].dataset.diff) === index);
+  }
+}
+
+for (let i = 0; i < diffButtons.length; i++) {
+  const btn = diffButtons[i];
+  const index = Number(btn.dataset.diff);
+  btn.addEventListener('touchstart', (e) => {
+    // preventDefault evita el click sintético posterior (doble activación).
+    e.stopPropagation();
+    e.preventDefault();
+    selectDifficulty(index);
+  }, { passive: false });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selectDifficulty(index);
+  });
+}
+selectDifficulty(difficulty.index); // refleja la dificultad guardada
+
 // --- Contador de FPS ---
 let fps = 0;
 let frames = 0;
@@ -234,6 +289,10 @@ let fpsTime = 0;
 // --- Game loop ---
 let lastFrameTime = 0;
 const TAU = Math.PI * 2;
+
+// Lista persistente de sprites no-enemigos (ítems + barriles + proyectiles +
+// explosiones) que se pasa al pase unificado de sprites del raycaster.
+const renderSprites = [];
 
 function frame(time) {
   const dt = Math.min((time - lastFrameTime) / 1000, 0.1);
@@ -257,6 +316,8 @@ function frame(time) {
       updatePlayer(state.map, dt);
       doors.update(state.map, dt);
       updateEnemies(state.map, dt);
+      projectiles.update(state.map, dt);
+      barrels.update(dt);
       weapon.update(state.map, dt);
       items.update();
       if (player.hp <= 0) {
@@ -275,7 +336,14 @@ function frame(time) {
 
   // Orden de dibujo: mundo (paredes + sprites con z-buffer) → arma → HUD →
   // pantallas de fin → controles táctiles y FPS.
-  raycaster.render(ctx, player, state.map, enemies, items.items);
+  // La lista de sprites no-enemigos se reconstruye reutilizando el MISMO
+  // array (solo se re-empujan referencias a descriptores preasignados:
+  // cero objetos nuevos por frame).
+  renderSprites.length = 0;
+  for (let i = 0; i < items.items.length; i++) renderSprites.push(items.items[i]);
+  barrels.pushSprites(renderSprites);
+  projectiles.pushSprites(renderSprites);
+  raycaster.render(ctx, player, state.map, enemies, renderSprites);
   if (started) {
     if (state.phase === 'playing' || state.phase === 'intermission') {
       weapon.render(ctx, renderWidth, renderHeight);
@@ -288,7 +356,7 @@ function frame(time) {
     } else if (state.phase === 'intermission') {
       hud.renderIntermission(ctx, renderWidth, renderHeight, dt, state.map.name, lastKills, lastTotal, lastTime);
     } else if (state.phase === 'end') {
-      hud.renderEnd(ctx, renderWidth, renderHeight, dt, totalKills, totalEnemies, totalTime, best, newBest);
+      hud.renderEnd(ctx, renderWidth, renderHeight, dt, totalKills, totalEnemies, totalTime, best, newBest, difficulty.name);
     }
   }
   drawOverlay();

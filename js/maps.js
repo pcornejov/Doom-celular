@@ -2,7 +2,8 @@
 //   '.' vacío   '#' piedra gris   'B' ladrillo   'M' metal   'R' rojo   'G' verde
 //   'D' puerta (se abre al usarla de cerca)   'X' salida de nivel
 //   'S' imp   's' imp rápido   'H' botiquín   'A' munición   'W' escopeta
-// Los marcadores S/s/H/A/W se extraen en compile() y su celda queda vacía.
+//   'O' barril explosivo ('B' ya es ladrillo)
+// Los marcadores S/s/H/A/W/O se extraen en compile() y su celda queda vacía.
 // Diseñado para leerse visualmente: cada string es una fila del mapa.
 
 export const DOOR_TYPE = 6;
@@ -13,24 +14,24 @@ const LEVEL_1 = [
   '#..........#...........#',
   '#.BBBB.....#..MMMM.....#',
   '#.B.AB.....#..M..M.....#',
-  '#.BS..........MS.M...S.#',
+  '#.BS.....O....MS.M...S.#',
   '#.B..B.....#..M..M.....#',
   '#.BBBB.....#..M.MM.....#',
   '#..........#...........#',
   '#####D######......######',
-  '#.....#....#.S..RRRR...#',
-  '#.....#....#....R..R...#',
+  '#.....#....#.S.ORRRR...#',
+  '#.....#....#.O..R..R...#',
   '#.....#....#....RS.R...#',
   '#.....#....#....R..R...#',
   '#H....#....#....R.RR...#',
   '#.....#....#...........#',
   '###D###....#D###########',
   '#......................#',
-  '#..GGG.....GGG......M..#',
+  '#..GGG..O..GGG......M..#',
   '#..G.G.S.S.G.G......M..#',
   '#..GGG.....GGG......MA.#',
   '#......................#',
-  '#..........MM....S.....#',
+  '#..........MM..O.S.....#',
   '#.H...............A....#',
   '####################X###',
 ];
@@ -40,22 +41,22 @@ const LEVEL_2 = [
   '#.......#........#....s..#',
   '#.......#..MM..S.#..BB...#',
   '#.......D..MM....#..BB..A#',
-  '#.......#................#',
+  '#.......#...O............#',
   '#.A.....#........#.......#',
-  '#....S..#....S...#....s..#',
+  '#....S..#....S.O.#....s..#',
   '####.#######D########.####',
   '#.......#........#.......#',
   '#..BB...#..GG....#..MM...#',
   '#..BB...D..GG..s.#..MM..W#',
   '#.......#........D.......#',
-  '#...S...#.....S..#....s..#',
+  '#...S...#.....S.O#....s..#',
   '#.......#........#.......#',
   '###.########D########D####',
   '#.......#........#.......#',
   '#..H....#..RR....#..RR...#',
   '#.......#..RR..S...RR....#',
-  '#...A............#.......#',
-  '#.......#....s...#....s..#',
+  '#...A.......O....#.......#',
+  '#.......#..O.s...#....s..#',
   '#....s..#........#..HA...#',
   '#####################X####',
 ];
@@ -65,20 +66,20 @@ const LEVEL_3 = [
   '#........................#',
   '#.A..RR........RR......H.#',
   '#....RR........RR........#',
-  '#..........ss............#',
-  '#....S.............S.....#',
+  '#..........ss.O..........#',
+  '#....S....O........S.....#',
   '#........................#',
   '#..RR......MM......RR....#',
   '#..RR..S...MM...S..RR....#',
-  '#..........MM............#',
+  '#..........MM...O........#',
   '#....s..............s....#',
   '#........................#',
-  '#.H..RR........RR.....A..#',
+  '#.H..RR...O....RR.....A..#',
   '#....RR....SS..RR........#',
   '#........................#',
   '######D#############D#####',
   '#..A.................H...#',
-  '#...s..............s.....#',
+  '#...s....O.........s.....#',
   '#........................#',
   '#############X############',
 ];
@@ -116,6 +117,7 @@ function compile(rows) {
   const cells = new Uint8Array(w * h);
   const enemySpawns = [];
   const items = [];
+  const barrelSpawns = [];
   const doors = [];
   let exit = null;
   for (let y = 0; y < h; y++) {
@@ -126,6 +128,8 @@ function compile(rows) {
       if (t === undefined) {
         if (ch === 'S' || ch === 's') {
           enemySpawns.push({ x: x + 0.5, y: y + 0.5, fast: ch === 's' });
+        } else if (ch === 'O') {
+          barrelSpawns.push({ x: x + 0.5, y: y + 0.5 });
         } else if (ITEM_KINDS[ch] !== undefined) {
           items.push({ x: x + 0.5, y: y + 0.5, kind: ITEM_KINDS[ch] });
         } else {
@@ -142,7 +146,7 @@ function compile(rows) {
   }
   if (!exit) throw new Error('Mapa sin salida (X)');
   // doorProg: progreso de apertura por celda, lo lee el raycaster (0 = cerrada).
-  return { w, h, cells, doorProg: new Float32Array(w * h), doors, items, enemySpawns, exit };
+  return { w, h, cells, doorProg: new Float32Array(w * h), doors, items, enemySpawns, barrelSpawns, exit };
 }
 
 export const level1 = {

@@ -45,7 +45,9 @@ function bakeSprite(draw) {
 }
 
 // Imp marrón/rojizo: cuernos, ojos brillantes, pecho rojo, garras.
-function drawImp(g, attack) {
+// `walk` intercambia las piernas (una flexionada, otra estirada): la segunda
+// pose del ciclo de andar.
+function drawImp(g, attack, walk) {
   const BODY = '#96502a';
   const DARK = '#3c1e12';
   const HORN = '#dcc8aa';
@@ -90,15 +92,28 @@ function drawImp(g, attack) {
     g.fillRect(17, 20, 3, 2);
   }
   // Piernas y pies con garras
-  g.fillStyle = DARK;
-  g.fillRect(8, 21, 3, 8);
-  g.fillRect(13, 21, 3, 8);
-  g.fillStyle = BODY;
-  g.fillRect(8, 21, 2, 7);
-  g.fillRect(13, 21, 2, 7);
-  g.fillStyle = HORN;
-  g.fillRect(7, 29, 4, 2);
-  g.fillRect(13, 29, 4, 2);
+  if (walk) {
+    // Zancada: pierna izquierda flexionada (rodilla en alto), derecha atrás.
+    g.fillStyle = DARK;
+    g.fillRect(7, 21, 3, 6);
+    g.fillRect(14, 21, 3, 8);
+    g.fillStyle = BODY;
+    g.fillRect(7, 21, 2, 5);
+    g.fillRect(14, 21, 2, 7);
+    g.fillStyle = HORN;
+    g.fillRect(6, 26, 4, 2);
+    g.fillRect(14, 29, 4, 2);
+  } else {
+    g.fillStyle = DARK;
+    g.fillRect(8, 21, 3, 8);
+    g.fillRect(13, 21, 3, 8);
+    g.fillStyle = BODY;
+    g.fillRect(8, 21, 2, 7);
+    g.fillRect(13, 21, 2, 7);
+    g.fillStyle = HORN;
+    g.fillRect(7, 29, 4, 2);
+    g.fillRect(13, 29, 4, 2);
+  }
 }
 
 // Cadáver: bulto oscuro achatado sobre un charco de sangre.
@@ -123,27 +138,32 @@ function tint(g, color) {
   g.globalCompositeOperation = 'source-over';
 }
 
-// Poses: 0 de pie, 1 atacando, 2 herido (tintado blanco), 3 cadáver.
-// El imp rápido reusa los mismos dibujos con un tinte azulado al hornear.
+// Poses: 0 de pie/andar A, 1 atacando, 2 herido (tintado blanco), 3 cadáver,
+// 4 andar B (piernas intercambiadas). El imp rápido reusa los mismos dibujos
+// con un tinte azulado al hornear.
 const FAST_TINT = 'rgba(45,90,220,0.5)';
 
 function bakePoses(fast) {
   return [
     bakeSprite((g) => {
-      drawImp(g, false);
+      drawImp(g, false, false);
       if (fast) tint(g, FAST_TINT);
     }),
     bakeSprite((g) => {
-      drawImp(g, true);
+      drawImp(g, true, false);
       if (fast) tint(g, FAST_TINT);
     }),
     bakeSprite((g) => {
-      drawImp(g, false);
+      drawImp(g, false, false);
       if (fast) tint(g, FAST_TINT);
       tint(g, 'rgba(255,255,255,0.55)');
     }),
     bakeSprite((g) => {
       drawCorpse(g);
+      if (fast) tint(g, FAST_TINT);
+    }),
+    bakeSprite((g) => {
+      drawImp(g, false, true);
       if (fast) tint(g, FAST_TINT);
     }),
   ];
@@ -380,8 +400,9 @@ const WALL_TEX = [
 ];
 
 // Buffers de ordenación por distancia (preasignados; insertion sort in-place).
-// Capacidad para enemigos + ítems del nivel más poblado, con margen.
-const MAX_SPRITES = 64;
+// Capacidad para enemigos + ítems + barriles + proyectiles + explosiones del
+// nivel más poblado, con margen.
+const MAX_SPRITES = 96;
 const spriteOrder = new Int32Array(MAX_SPRITES);
 const spriteDist = new Float32Array(MAX_SPRITES);
 const NO_ITEMS = [];
@@ -528,7 +549,8 @@ export function render(ctx, player, map, enemies, items) {
 // recortar cada columna contra el z-buffer de las paredes.
 // Una sola lista ordenada mezcla enemigos (índices 0..nE-1, textura según
 // pose) e ítems (índices nE.., textura y tamaño propios: {x,y,tex,texW,texH,
-// sizeFactor}).
+// sizeFactor}). Un descriptor con vCenter=true se centra verticalmente en la
+// celda (proyectiles que flotan) en vez de apoyarse en el suelo.
 function drawSprites(player, dirX, dirY, planeX, planeY, enemies, items) {
   // Orden por distancia descendente (los lejanos primero).
   const nE = enemies.length;
@@ -564,7 +586,7 @@ function drawSprites(player, dirX, dirY, planeX, planeY, enemies, items) {
 
   for (let i = 0; i < n; i++) {
     const oi = spriteOrder[i];
-    let tex, tw, th, sizeFactor, wx, wy;
+    let tex, tw, th, sizeFactor, wx, wy, vCenter;
     if (oi < nE) {
       const e = enemies[oi];
       tex = (e.fast ? POSES_FAST : POSES)[e.pose];
@@ -573,6 +595,7 @@ function drawSprites(player, dirX, dirY, planeX, planeY, enemies, items) {
       sizeFactor = 0.82; // el imp no llega al techo
       wx = e.x;
       wy = e.y;
+      vCenter = false;
     } else {
       const it = items[oi - nE];
       tex = it.tex;
@@ -581,6 +604,7 @@ function drawSprites(player, dirX, dirY, planeX, planeY, enemies, items) {
       sizeFactor = it.sizeFactor;
       wx = it.x;
       wy = it.y;
+      vCenter = it.vCenter === true;
     }
     const sx = wx - player.x;
     const sy = wy - player.y;
@@ -595,9 +619,16 @@ function drawSprites(player, dirX, dirY, planeX, planeY, enemies, items) {
     const sprW = (sprH * (tw / th)) | 0;
     if (sprW < 1) continue;
 
-    // Base apoyada en el suelo: alineada con la base de la celda.
-    const floorY = ((H + cellH) / 2) | 0;
-    const y0 = floorY - sprH;
+    // Base apoyada en el suelo (alineada con la base de la celda) o, con
+    // vCenter, centrado verticalmente a la altura de los ojos.
+    let floorY, y0;
+    if (vCenter) {
+      y0 = ((H - sprH) / 2) | 0;
+      floorY = y0 + sprH;
+    } else {
+      floorY = ((H + cellH) / 2) | 0;
+      y0 = floorY - sprH;
+    }
     const screenX = ((W / 2) * (1 + transformX / transformY)) | 0;
     const x0 = screenX - (sprW >> 1);
 
