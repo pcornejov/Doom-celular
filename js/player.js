@@ -1,7 +1,9 @@
 // Jugador: posición, rotación, movimiento con colisión contra la grilla.
-// Entrada provisional de teclado para probar en desktop; los controles
-// táctiles llegan en la Iteración 2 y alimentarán las mismas variables
-// de intención (moveForward, moveStrafe, turn).
+// La entrada llega por dos vías que se combinan en update():
+//   - Teclado (desktop): readKeyboard() cada frame.
+//   - Táctil (touch.js): escribe touchForward/touchStrafe/touchMoveActive
+//     y acumula turnImpulse (radianes que se consumen este frame).
+// Si el joystick táctil está activo tiene prioridad sobre el teclado.
 
 import { cellAt } from './maps.js';
 
@@ -13,11 +15,16 @@ export const player = {
   x: 0,
   y: 0,
   angle: 0,
-  // Intención de movimiento por frame, en [-1, 1]. La escribe el teclado
-  // hoy y el táctil mañana.
+  // Intención de movimiento resultante de este frame, en [-1, 1].
   moveForward: 0,
   moveStrafe: 0,
   turn: 0,
+  // Giro táctil: radianes acumulados por touch.js, se consumen en update().
+  turnImpulse: 0,
+  // Joystick táctil (lo escribe touch.js).
+  touchForward: 0,
+  touchStrafe: 0,
+  touchMoveActive: false,
 };
 
 export function spawn(map) {
@@ -32,6 +39,12 @@ window.addEventListener('keydown', (e) => keys.add(e.code));
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
 
+// Intención del teclado de este frame (no pisa a player.* directamente:
+// update() la combina con la entrada táctil).
+let kbForward = 0;
+let kbStrafe = 0;
+let kbTurn = 0;
+
 function readKeyboard() {
   let f = 0, s = 0, t = 0;
   if (keys.has('KeyW') || keys.has('ArrowUp')) f += 1;
@@ -40,9 +53,9 @@ function readKeyboard() {
   if (keys.has('KeyD')) s += 1;
   if (keys.has('ArrowLeft')) t -= 1;
   if (keys.has('ArrowRight')) t += 1;
-  player.moveForward = f;
-  player.moveStrafe = s;
-  player.turn = t;
+  kbForward = f;
+  kbStrafe = s;
+  kbTurn = t;
 }
 
 // Intenta mover cada eje por separado para deslizarse por las paredes.
@@ -68,7 +81,19 @@ function tryMove(map, nx, ny) {
 export function update(map, dt) {
   readKeyboard();
 
-  player.angle += player.turn * TURN_SPEED * dt;
+  // El joystick táctil manda mientras está activo; si no, teclado.
+  if (player.touchMoveActive) {
+    player.moveForward = player.touchForward;
+    player.moveStrafe = player.touchStrafe;
+  } else {
+    player.moveForward = kbForward;
+    player.moveStrafe = kbStrafe;
+  }
+  player.turn = kbTurn;
+
+  // Giro: continuo (teclado) + impulso táctil en radianes, que se consume.
+  player.angle += player.turn * TURN_SPEED * dt + player.turnImpulse;
+  player.turnImpulse = 0;
 
   const cos = Math.cos(player.angle);
   const sin = Math.sin(player.angle);
