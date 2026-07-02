@@ -15,6 +15,9 @@ export const player = {
   x: 0,
   y: 0,
   angle: 0,
+  hp: 100,
+  // Temporizador del flash rojo de daño (lo consume el HUD).
+  hurtTimer: 0,
   // Intención de movimiento resultante de este frame, en [-1, 1].
   moveForward: 0,
   moveStrafe: 0,
@@ -31,6 +34,17 @@ export function spawn(map) {
   player.x = map.playerStart.x;
   player.y = map.playerStart.y;
   player.angle = map.playerStart.angle;
+  player.hp = 100;
+  player.hurtTimer = 0;
+}
+
+// Daño al jugador (lo llaman los enemigos). main.js detecta hp <= 0.
+export function damagePlayer(amount) {
+  if (player.hp <= 0) return;
+  player.hp -= amount;
+  if (player.hp < 0) player.hp = 0;
+  player.hurtTimer = 0.2;
+  window.__audio?.playerHurt?.();
 }
 
 // --- Teclado (desktop) ---

@@ -1,11 +1,14 @@
 // Doom Celular — game loop y orquestación.
-// Iteración 2: controles táctiles reales (joystick flotante, giro por
-// arrastre, botón de disparo) + pantalla TAP TO START + aviso de orientación.
+// Iteración 3: combate — enemigos con IA, pistola hitscan, vida del jugador,
+// HUD estilo Doom y pantallas de muerte / victoria con reinicio.
 
 import { level1 } from './maps.js';
 import * as raycaster from './raycaster.js';
 import { player, spawn, update as updatePlayer } from './player.js';
 import { initTouch, touch } from './touch.js';
+import { enemies, update as updateEnemies, reset as resetEnemies, allDead } from './enemies.js';
+import * as weapon from './weapon.js';
+import * as hud from './hud.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -19,9 +22,30 @@ let renderWidth = 320;
 const map = level1;
 spawn(map);
 initTouch(canvas);
+weapon.initWeapon(canvas);
 
-// Depuración: expone el jugador para inspección desde la consola / tests.
+// Depuración: expone jugador y enemigos para inspección / tests.
 window.player = player;
+window.enemies = enemies;
+
+// Fase de la partida una vez iniciada: jugando, muerto o nivel limpio.
+let phase = 'playing';
+let endTimer = 0; // evita reiniciar por el mismo toque que te mató/ganó
+
+function resetLevel() {
+  spawn(map);
+  resetEnemies();
+  weapon.reset();
+  phase = 'playing';
+  endTimer = 0;
+}
+
+function tryRestart() {
+  if (started && phase !== 'playing' && endTimer > 0.8) resetLevel();
+}
+canvas.addEventListener('touchstart', tryRestart, { passive: true });
+canvas.addEventListener('click', tryRestart);
+window.addEventListener('keydown', tryRestart);
 
 function resize() {
   const aspect = window.innerWidth / window.innerHeight;
@@ -83,8 +107,32 @@ function frame(time) {
     fpsTime = 0;
   }
 
-  if (started) updatePlayer(map, dt);
-  raycaster.render(ctx, player, map);
+  if (started) {
+    if (phase === 'playing') {
+      updatePlayer(map, dt);
+      updateEnemies(map, dt);
+      weapon.update(map, dt);
+      if (player.hp <= 0) {
+        phase = 'dead';
+        window.__audio?.playerDeath?.();
+      } else if (allDead()) {
+        phase = 'victory';
+        window.__audio?.playVictory?.();
+      }
+    } else {
+      endTimer += dt;
+    }
+  }
+
+  // Orden de dibujo: mundo (paredes + sprites con z-buffer) → arma → HUD →
+  // pantallas de fin → controles táctiles y FPS.
+  raycaster.render(ctx, player, map, enemies);
+  if (started) {
+    if (phase !== 'dead') weapon.render(ctx, renderWidth, RENDER_HEIGHT);
+    hud.render(ctx, renderWidth, RENDER_HEIGHT, dt);
+    if (phase === 'dead') hud.renderDeath(ctx, renderWidth, RENDER_HEIGHT, dt);
+    else if (phase === 'victory') hud.renderVictory(ctx, renderWidth, RENDER_HEIGHT, dt);
+  }
   drawOverlay();
 
   requestAnimationFrame(frame);
